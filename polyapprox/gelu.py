@@ -27,5 +27,5 @@ def gelu_prime_ev(mu, sigma):
     """Expected value of GELU'(x) under N(mu, sigma)"""
     denom = np.sqrt(1 + sigma ** 2)
 
-    inner = mu / denom - sigma / denom ** 2 + mu * sigma ** 2 / denom ** 3
+    inner = mu / denom - mu * sigma ** 2 / denom ** 3
     return norm.cdf(mu / denom) + norm.pdf(mu / denom) * inner
