@@ -1,6 +1,9 @@
 from scipy.special import expit as sigmoid
 
 
+def sigmoid_prime(x):
+    return sigmoid(x) * (1 - sigmoid(x))
+
 def swish(x):
     return x * sigmoid(x)
 

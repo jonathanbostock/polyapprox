@@ -4,7 +4,7 @@ from functools import partial
 from numpy.typing import NDArray
 import numpy as np
 
-from .extra import swish, swish_prime
+from .extra import sigmoid, sigmoid_prime, swish, swish_prime
 from .gelu import gelu_ev, gelu_prime_ev
 from .hermite import gauss_hermite
 from .relu import relu_ev, relu_prime_ev
@@ -55,9 +55,15 @@ def ols(
         case 'relu':
             act_ev = relu_ev
             act_prime_ev = relu_prime_ev
+        case 'sigmoid':
+            act_ev = partial(gauss_hermite, sigmoid)
+            act_prime_ev = partial(gauss_hermite, sigmoid_prime)
         case 'swish':
             act_ev = partial(gauss_hermite, swish)
             act_prime_ev = partial(gauss_hermite, swish_prime)
+        case 'tanh':
+            act_ev = partial(gauss_hermite, np.tanh)
+            act_prime_ev = partial(gauss_hermite, lambda x: 1 - np.tanh(x)**2)
         case _:
             raise ValueError(f"Unknown activation function: {act}")
 
