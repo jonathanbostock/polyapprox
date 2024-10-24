@@ -1,9 +1,12 @@
 from collections import namedtuple
+from functools import partial
 
 from numpy.typing import NDArray
 import numpy as np
 
+from .extra import swish, swish_prime
 from .gelu import gelu_ev, gelu_prime_ev
+from .hermite import gauss_hermite
 from .relu import relu_ev, relu_prime_ev
 
 
@@ -35,15 +38,15 @@ def ols(
     if cov is not None:
         preact_var = np.diag(W1 @ cov @ W1.T)
         preact_std = np.sqrt(preact_var)
+
+        cross_cov = cov @ W1.T
     else:
         preact_std = np.linalg.norm(W1, axis=1) # sqrt(diag(W1 @ W1.T))
+        cross_cov = W1.T
 
-    preact_mean = b1
+    preact_mean = b1.copy()
     if mean is not None:
         preact_mean += W1 @ mean
-
-    # Cross-covariance between inputs and preactivations
-    cross_cov = W1
 
     match act:
         case 'gelu':
@@ -52,19 +55,28 @@ def ols(
         case 'relu':
             act_ev = relu_ev
             act_prime_ev = relu_prime_ev
+        case 'swish':
+            act_ev = partial(gauss_hermite, swish)
+            act_prime_ev = partial(gauss_hermite, swish_prime)
         case _:
             raise ValueError(f"Unknown activation function: {act}")
 
-    # Compute expectation of GELU'(x) for each preactivation
+    # Apply Stein's lemma to compute cross-covariance of the input
+    # with the activations. We need the expected derivative of the
+    # activation function with respect to the preactivation.
     act_mean = act_prime_ev(preact_mean, preact_std)
-    beta = W2 @ (cross_cov * act_mean[:, None])
+    beta = (cross_cov * act_mean) @ W2.T
 
     # Compute expectation of GELU(x) for each preactivation
     act_mean = act_ev(preact_mean, preact_std)
     output_mean = W2 @ act_mean + b2
 
+    # beta = Cov(x)^-1 Cov(x, f(x))
+    if cov is not None:
+        beta = np.linalg.solve(cov, beta)
+
     alpha = output_mean
     if mean is not None:
-        alpha -= beta @ mean
+        alpha -= beta.T @ mean
 
     return OlsResult(alpha, beta)

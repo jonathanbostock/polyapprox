@@ -29,3 +29,12 @@ def gelu_prime_ev(mu, sigma):
 
     inner = mu / denom - mu * sigma ** 2 / denom ** 3
     return norm.cdf(mu / denom) + norm.pdf(mu / denom) * inner
+
+
+def gelu_dbl_prime_ev(mu, sigma):
+    """Expected value of GELU''(x) under N(mu, sigma)"""
+    denom = np.sqrt(1 + sigma ** 2)
+
+    inner1 = 1 / denom - 3 * mu ** 2 / denom ** 3
+    inner2 = -3 * mu / denom ** 3 + 9 * mu ** 3 / denom ** 5
+    return norm.cdf(mu / denom) + norm.pdf(mu / denom) * inner1 + norm.pdf(mu / denom) * inner2
