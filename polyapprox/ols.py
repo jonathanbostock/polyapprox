@@ -59,6 +59,7 @@ def ols(
     act: str = 'gelu',
     mean: NDArray | None = None,
     cov: NDArray | None = None,
+    return_fvu: bool = False,
 ) -> OlsResult:
     """Ordinary least squares approximation of a single hidden layer MLP.
 
@@ -70,6 +71,9 @@ def ols(
         mean: Mean of the input distribution. If None, the mean is zero.
         cov: Covariance of the input distribution. If None, the covariance is the
             identity matrix.
+        return_fvu: Whether to compute the fraction of variance unexplained.
+            This is only available for ReLU activations, and can be computationally
+            expensive for large networks.
     """
     # Preactivations are Gaussian; compute their mean and standard deviation
     if cov is not None:
@@ -113,7 +117,7 @@ def ols(
 
     # For ReLU, we can compute the covariance matrix of the activations, which is
     # useful for computing the fraction of variance unexplained in closed form.
-    if act == 'relu':
+    if act == 'relu' and return_fvu:
         rhos = preact_cov / np.outer(preact_std, preact_std)
 
         # Compute the raw second moment matrix of the activations
