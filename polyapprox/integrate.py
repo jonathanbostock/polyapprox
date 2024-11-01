@@ -51,19 +51,19 @@ def bivariate_product_moment(
     term4 = (denom / np.sqrt(2 * np.pi)) * norm.pdf(numer / denom)
     
     # Correct answer if mean_x = mean_y = 0
-    m11 = std_x * std_y * (term1 + term2 + term3 + term4) / L_hk_rho
+    m11 = std_x * std_y * (term1 + term2 + term3 + term4)
 
     # Account for being noncentered
     # E[(s_x z_x + m_x) (s_y z_y + m_y)] =
     # s_x s_y E[z_x * z_y] + m_x s_y E[z_y] + m_y s_x E[z_x] + m_x m_y
     # Compute E[z_x] and E[z_y] using the truncated first moments
-    m10 = (Z_h * Q_k_given_h + rho * Z_k * Q_h_given_k) / L_hk_rho
-    m01 = (rho * Z_h * Q_k_given_h + Z_k * Q_h_given_k) / L_hk_rho
-    m11 += std_x * mean_y * m10 + std_y * mean_x * m01 + mean_x * mean_y
+    m10 = (Z_h * Q_k_given_h + rho * Z_k * Q_h_given_k)
+    m01 = (rho * Z_h * Q_k_given_h + Z_k * Q_h_given_k)
+    m11 += std_x * mean_y * m10 + std_y * mean_x * m01 + mean_x * mean_y * L_hk_rho
 
-    # Multiply by the probability that we would end up in the truncated region
-    if unconditional:
-        m11 *= L_hk_rho
+    # Divide by the probability that we would end up in the truncated region
+    if not unconditional:
+        m11 /= L_hk_rho
 
     return m11
 
