@@ -138,7 +138,8 @@ def ols(
         lin_scale = np.trace(beta.T @ cov @ beta) + inner + alpha.T @ alpha
 
         # Fraction of variance unexplained
-        fvu = (mlp_scale - 2 * inner_prod + lin_scale) / mlp_scale
+        denom = mlp_scale - output_mean @ output_mean
+        fvu = (mlp_scale - 2 * inner_prod + lin_scale) / denom
     else:
         fvu = None
 
