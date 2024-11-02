@@ -24,12 +24,6 @@ def relu_prime_ev(mu, sigma):
     return norm.cdf(mu / sigma)
 
 
-def relu_squared_ev(mu, sigma):
-    """Expected value of RELU(x)^2 under N(mu, sigma)"""
-    loc = mu / sigma
-    return sigma ** 2 * (loc ** 2 + 1) * norm.cdf(loc) + mu * sigma * norm.pdf(loc)
-
-
 def relu_poly_ev(n: int, mu: ArrayLike, sigma: ArrayLike) -> NDArray:
     """
     Compute E[x^n * ReLU(x)] analytically where x ~ N(mu, sigma^2)

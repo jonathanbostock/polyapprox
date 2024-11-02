@@ -161,18 +161,16 @@ def isserlis(cov: np.ndarray, indices: list[int]):
     )
 
 
-def master_theorem(mu: np.ndarray, cov: np.ndarray) -> list[np.ndarray]:
-    """Reduce a multivariate integral E[g(x) * y1 * y2 ...] to univariate integrals.
-    
-    Given a multivariate Gaussian distribution N(mu, cov), this function returns the
-    coefficients for the polynomial E[a_k g(x)x^k + a_{k - 1} g(x)x^{k - 1} ...] that's
-    equivalent to E[g(x) * y1 * y2 ...], where x is the first component of the vector,
-    and y1, y2, ... are the remaining components. This allows us to compute the
-    expected value in terms of univariate integrals, which can be done analytically for
-    some functions g(x), and using `gauss_hermite` for others.
-    """
-    *batch_shape, k = mu.shape
-    *batch_shape2, k2, k3 = cov.shape
+def master_theorem(
+    mu_x: np.ndarray,
+    cov_x: np.ndarray,
+    mu_y: np.ndarray,
+    var_y: np.ndarray,
+    xcov: np.ndarray
+):
+    """Reduce the multivariate integral E[g(y) * x1 * x2 ...] to k univariate integrals."""
+    *batch_shape, k = mu_x.shape
+    *batch_shape2, k2, k3 = cov_x.shape
 
     assert batch_shape == batch_shape2, "Batch dimensions must match"
     assert k == k2 == k3, "Dimension of means and covariances must match"
@@ -180,41 +178,40 @@ def master_theorem(mu: np.ndarray, cov: np.ndarray) -> list[np.ndarray]:
     # TODO: Make this work for constant X0 by choosing a "pivot" variable
     # from among the X_i with the largest variance, then computing all the
     # conditional expectations with respect to that variable.
-    var0, xcov = cov[..., 0, 0], cov[..., 0, 1:]
-    assert var0 > 0.0, "X0 must have positive variance"
+    assert np.all(var_y > 0.0), "X0 must have positive variance"
 
     # Coefficients and intercepts for each conditional expectation
-    a = xcov / var0
-    b = -a * mu[..., 0] + mu[..., 1:]
+    a = xcov / var_y[..., None]
+    b = -a * mu_y[..., None] + mu_x
 
     # Covariance matrix of the residuals
-    eps_cov = cov[..., 1:, 1:] - cov[..., 0, 1:, None] * a[..., None, :]
+    eps_cov = cov_x - xcov[..., None] * a[..., None, :]
 
     # Polynomial coefficients get appended here
     coefs = []
 
     # Iterate over polynomial terms
-    for m in range(k):
+    for m in range(k + 1):
         # Running sum of terms in the coefficient
-        coef = 0.0#np.zeros(batch_shape)
+        coef = np.zeros(batch_shape)
 
         # Enumerate every combination of m unique a terms
-        for comb in combinations(range(k - 1), m):
-            prefix = 1.0#np.ones(batch_shape)
+        for comb in combinations(range(k), m):
+            prefix = np.ones(batch_shape)
 
             # Multiply together the a terms
             for i in comb:
-                prefix *= a[i]
+                prefix = prefix * a[..., i]
 
             # Get a list of indices that are left over. The correctness of this
             # depends on combinations returning the indices in sorted order.
-            remaining = list(range(k - 1))
+            remaining = list(range(k))
             for idx in reversed(comb):
                 del remaining[idx]
 
             # Iterate over all bitstrings of length k - m, and each bit in
-            # the bitstring tells us whether to pick a b subterm
-            # or a residual subterm.
+            # the bitstring tells us whether to pick a `b` factor
+            # or a residual factor.
             for bitstring in product([0, 1], repeat=len(remaining)):
                 num_residuals = sum(bitstring)
                 residual_indices = []
@@ -223,22 +220,23 @@ def master_theorem(mu: np.ndarray, cov: np.ndarray) -> list[np.ndarray]:
                 if num_residuals % 2:
                     continue
 
-                # Running product of subterms
+                # Running product of factors
                 term = prefix
 
-                # Multiply together the b terms
+                # Multiply together the b factors
                 for i, bit in zip(remaining, bitstring):
                     if bit:
                         residual_indices.append(i)
                     else:
-                        term *= b[i]
+                        term = term * b[..., i]
                 
-                # Apply Isserlis' theorem to the residual terms
+                # Apply Isserlis' theorem to the residual factors
                 if residual_indices:
-                    term *= isserlis(eps_cov, residual_indices)
+                    iss = isserlis(eps_cov, residual_indices)
+                    term = term * iss
 
                 # Add the term to the coefficient
-                coef += term
+                coef = coef + term
         
         coefs.append(coef)
 
