@@ -1,13 +1,14 @@
 from dataclasses import dataclass
 from functools import partial
+from typing import Literal
 
 from numpy.typing import ArrayLike, NDArray
 import numpy as np
 
 from .extra import sigmoid, sigmoid_prime, swish, swish_prime
-from .gelu import gelu_ev, gelu_prime_ev
-from .integrate import bivariate_product_moment, gauss_hermite
-from .relu import relu_ev, relu_prime_ev
+from .gelu import gelu_ev, gelu_prime_ev, gelu_poly_ev
+from .integrate import bivariate_product_moment, gauss_hermite, master_theorem
+from .relu import relu_ev, relu_prime_ev, relu_poly_ev
 
 
 @dataclass(frozen=True)
@@ -18,8 +19,8 @@ class OlsResult:
     beta: NDArray
     """Coefficients of the linear model."""
 
-    mean: NDArray
-    """Mean of the output distribution."""
+    gamma: NDArray | None = None
+    """Coefficients for second-order interactions, if available."""
 
     fvu: float | None = None
     """Fraction of variance unexplained, if available.
@@ -29,7 +30,15 @@ class OlsResult:
 
     def __call__(self, x: NDArray) -> NDArray:
         """Evaluate the linear model at the given inputs."""
-        return x @ self.beta + self.alpha
+        y = x @ self.beta + self.alpha
+
+        if self.gamma is not None:
+            outer = np.einsum('ij,ik->ijk', x, x)
+
+            rows, cols = np.tril_indices(x.shape[1])
+            y += outer[:, rows, cols] @ self.gamma
+
+        return y
 
 
 # Mapping from activation functions to EVs
@@ -48,6 +57,10 @@ ACT_TO_PRIME_EVS = {
     'swish': partial(gauss_hermite, swish_prime),
     'tanh': partial(gauss_hermite, lambda x: 1 - np.tanh(x)**2),
 }
+ACT_TO_POLY_EVS = {
+    'gelu': gelu_poly_ev,
+    'relu': relu_poly_ev,
+}
 
 
 def ols(
@@ -59,6 +72,7 @@ def ols(
     act: str = 'gelu',
     mean: NDArray | None = None,
     cov: NDArray | None = None,
+    order: Literal['linear', 'quadratic'] = 'linear',
     return_fvu: bool = False,
 ) -> OlsResult:
     """Ordinary least squares approximation of a single hidden layer MLP.
@@ -75,6 +89,8 @@ def ols(
             This is only available for ReLU activations, and can be computationally
             expensive for large networks.
     """
+    d_input = W1.shape[1]
+
     # Preactivations are Gaussian; compute their mean and standard deviation
     if cov is not None:
         preact_cov = W1 @ cov @ W1.T
@@ -98,8 +114,8 @@ def ols(
     # Apply Stein's lemma to compute cross-covariance of the input
     # with the activations. We need the expected derivative of the
     # activation function with respect to the preactivation.
-    act_mean = act_prime_ev(preact_mean, preact_std)
-    cross_cov = (cross_cov * act_mean) @ W2.T
+    act_prime_mean = act_prime_ev(preact_mean, preact_std)
+    output_cross_cov = (cross_cov * act_prime_mean) @ W2.T
 
     # Compute expectation of act_fn(x) for each preactivation
     act_mean = act_ev(preact_mean, preact_std)
@@ -107,9 +123,57 @@ def ols(
 
     # beta = Cov(x)^-1 Cov(x, f(x))
     if cov is not None:
-        beta = np.linalg.solve(cov, cross_cov)
+        beta = np.linalg.solve(cov, output_cross_cov)
     else:
-        beta = cross_cov
+        beta = output_cross_cov
+
+    if order == 'quadratic':
+        cov = cov_x = cov if cov is not None else np.eye(d_input)
+        mu = mean if mean is not None else np.zeros(d_input)
+        rows, cols = np.tril_indices(d_input)
+
+        cov_y = W1 @ W1.T
+        xcov = cov_x @ W1.T
+
+        cov_x = cov
+        mean_y = mu @ W1.T + b1
+        var_x = np.diag(cov_x)
+
+        Cov_x = np.array([
+            [var_x[rows], cov_x[rows, cols]],
+            [cov_x[cols, rows], var_x[cols]],
+        ]).T
+
+        Xcov = np.stack([
+            xcov[rows],
+            xcov[cols],
+        ]).T
+
+        Mean_x = np.array([mu[rows], mu[cols]]).T
+        Var_y = np.diag(cov_y)
+
+        coefs = master_theorem(
+            Mean_x, Cov_x, mean_y[..., None], Var_y[..., None], Xcov
+        )
+
+        # Compute univariate integrals
+        try:
+            poly_ev = ACT_TO_POLY_EVS[act]
+        except KeyError:
+            raise ValueError(f"Quadratic not implemented for activation: {act}")
+        
+        quad = poly_ev(2, preact_mean, preact_std)
+        lin = poly_ev(1, preact_mean, preact_std)
+        const = poly_ev(0, preact_mean, preact_std)
+        E_gy_x1x2 = (
+            coefs[0] * quad[:, None] +
+            coefs[1] * lin[:, None] +
+            coefs[2] * const[:, None]
+        )
+        quad_xcov = W2 @ (E_gy_x1x2 - np.outer(const, (rows == cols)))
+        gamma = quad_xcov / (1 + (rows == cols))
+    else:
+        gamma = None
 
     alpha = output_mean
     if mean is not None:
@@ -118,6 +182,8 @@ def ols(
     # For ReLU, we can compute the covariance matrix of the activations, which is
     # useful for computing the fraction of variance unexplained in closed form.
     if act == 'relu' and return_fvu:
+        # TODO: Figure out what is wrong with our implementation for non-zero means
+        assert mean is None, "FVU computation is not implemented for non-zero means"
         rhos = preact_cov / np.outer(preact_std, preact_std)
 
         # Compute the raw second moment matrix of the activations
@@ -147,7 +213,7 @@ def ols(
     else:
         fvu = None
 
-    return OlsResult(alpha, beta, output_mean, fvu=fvu)
+    return OlsResult(alpha, beta, fvu=fvu, gamma=gamma)
 
 
 def glu_mean(
