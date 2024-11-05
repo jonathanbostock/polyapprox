@@ -127,6 +127,10 @@ def ols(
     else:
         beta = output_cross_cov
 
+    alpha = output_mean
+    if mean is not None:
+        alpha -= beta.T @ mean
+
     if order == 'quadratic':
         cov = cov_x = cov if cov is not None else np.eye(d_input)
         mu = mean if mean is not None else np.zeros(d_input)
@@ -172,12 +176,11 @@ def ols(
         )
         quad_xcov = W2 @ (E_gy_x1x2 - np.outer(const, (rows == cols)))
         gamma = quad_xcov / (1 + (rows == cols))
+
+        # adjust constant term
+        alpha -= (rows == cols) @ gamma.T
     else:
         gamma = None
-
-    alpha = output_mean
-    if mean is not None:
-        alpha -= beta.T @ mean
 
     # For ReLU, we can compute the covariance matrix of the activations, which is
     # useful for computing the fraction of variance unexplained in closed form.
