@@ -136,10 +136,9 @@ def ols(
         mu = mean if mean is not None else np.zeros(d_input)
         rows, cols = np.tril_indices(d_input)
 
-        cov_y = W1 @ W1.T
+        cov_y = W1 @ cov_x @ W1.T
         xcov = cov_x @ W1.T
 
-        cov_x = cov
         mean_y = mu @ W1.T + b1
         var_x = np.diag(cov_x)
 
