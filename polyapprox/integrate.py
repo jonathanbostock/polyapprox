@@ -161,6 +161,27 @@ def isserlis(cov: np.ndarray, indices: list[int]):
     )
 
 
+def noncentral_isserlis(cov: np.ndarray, mean: np.ndarray):
+    """Compute E[X1 * X2 * ... * Xd] for a noncentral multivariate Gaussian."""
+    d = mean.shape[-1]
+    ev = 0.0
+
+    # Iterate over even orders, since the odd orders will be zero
+    for k in range(0, d + 1, 2):
+        # Iterate over all combinations of k unique indices
+        for comb in combinations(range(d), k):
+            # Get a list of indices that are left over. The correctness of this
+            # depends on combinations returning the indices in sorted order.
+            remaining = list(range(d))
+            for idx in reversed(comb):
+                del remaining[idx]
+
+            const = np.prod([mean[..., i] for i in remaining], axis=0)
+            ev += const * isserlis(cov, list(comb))
+
+    return ev
+
+
 def master_theorem(
     mu_x: np.ndarray,
     cov_x: np.ndarray,

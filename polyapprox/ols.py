@@ -7,7 +7,9 @@ import numpy as np
 
 from .extra import sigmoid, sigmoid_prime, swish, swish_prime
 from .gelu import gelu_ev, gelu_prime_ev, gelu_poly_ev
-from .integrate import bivariate_product_moment, gauss_hermite, master_theorem
+from .integrate import (
+    bivariate_product_moment, gauss_hermite, master_theorem, noncentral_isserlis
+)
 from .relu import relu_ev, relu_prime_ev, relu_poly_ev
 
 
@@ -132,31 +134,35 @@ def ols(
         alpha -= beta.T @ mean
 
     if order == 'quadratic':
-        cov = cov_x = cov if cov is not None else np.eye(d_input)
-        mu = mean if mean is not None else np.zeros(d_input)
+        # Get indices to all unique pairs of input dimensions
         rows, cols = np.tril_indices(d_input)
 
-        cov_y = W1 @ cov_x @ W1.T
-        xcov = cov_x @ W1.T
+        cov_x = cov if cov is not None else np.eye(d_input)
+        mu = mean if mean is not None else np.zeros(d_input)
 
-        mean_y = mu @ W1.T + b1
-        var_x = np.diag(cov_x)
-
-        Cov_x = np.array([
-            [var_x[rows], cov_x[rows, cols]],
-            [cov_x[cols, rows], var_x[cols]],
+        # "Expand" our covariance and cross-covariance matrices into a batch of 2x2
+        # and 2x1 matrices, respectively, to apply the master theorem. Each matrix
+        # corresponds to a pairing of two input dimensions. We do a similar thing
+        # for the means, which are 1D vectors.
+        expanded_cov = np.array([
+            [cov_x[rows, rows], cov_x[rows, cols]],
+            [cov_x[cols, rows], cov_x[cols, cols]],
         ]).T
-
-        Xcov = np.stack([
-            xcov[rows],
-            xcov[cols],
+        expanded_xcov = np.array([
+            cross_cov[rows],
+            cross_cov[cols],
         ]).T
-
-        Mean_x = np.array([mu[rows], mu[cols]]).T
-        Var_y = np.diag(cov_y)
+        expanded_mean = np.array([mu[rows], mu[cols]]).T
 
         coefs = master_theorem(
-            Mean_x, Cov_x, mean_y[..., None], Var_y[..., None], Xcov
+            # Add an extra singleton dimension so that we can broadcast across all the
+            # pairings of input dimensions
+            mu_y=preact_mean[..., None],
+            var_y=preact_var[..., None],
+
+            cov_x=expanded_cov,
+            xcov=expanded_xcov,
+            mu_x=expanded_mean,
         )
 
         # Compute univariate integrals
@@ -173,11 +179,16 @@ def ols(
             coefs[1] * lin[:, None] +
             coefs[2] * const[:, None]
         )
-        quad_xcov = W2 @ (E_gy_x1x2 - np.outer(const, (rows == cols)))
+
+        # Compute the mean and covariance matrix of the input features
+        # (products of potentially non-central jointly Gaussian variables)
+        feature_mean = noncentral_isserlis(expanded_cov, expanded_mean)
+
+        quad_xcov = W2 @ (E_gy_x1x2 - np.outer(const, feature_mean))
         gamma = quad_xcov / (1 + (rows == cols))
 
         # adjust constant term
-        alpha -= (rows == cols) @ gamma.T
+        alpha -= feature_mean @ gamma.T
     else:
         gamma = None
 
