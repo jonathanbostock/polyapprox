@@ -1,8 +1,8 @@
 from dataclasses import dataclass
 from functools import partial
 
-from numpy.typing import ArrayLike, NDArray
 import numpy as np
+from numpy.typing import ArrayLike, NDArray
 
 from .extra import sigmoid, sigmoid_prime, swish, swish_prime
 from .gelu import gelu_ev, gelu_prime_ev
@@ -23,7 +23,7 @@ class OlsResult:
 
     fvu: float | None = None
     """Fraction of variance unexplained, if available.
-    
+
     Currently only implemented for ReLU activations.
     """
 
@@ -34,29 +34,29 @@ class OlsResult:
 
 # Mapping from activation functions to EVs
 ACT_TO_EVS = {
-    'gelu': gelu_ev,
-    'relu': relu_ev,
-    'sigmoid': partial(gauss_hermite, sigmoid),
-    'swish': partial(gauss_hermite, swish),
-    'tanh': partial(gauss_hermite, np.tanh),
+    "gelu": gelu_ev,
+    "relu": relu_ev,
+    "sigmoid": partial(gauss_hermite, sigmoid),
+    "swish": partial(gauss_hermite, swish),
+    "tanh": partial(gauss_hermite, np.tanh),
 }
 # Mapping from activation functions to EVs of their derivatives
 ACT_TO_PRIME_EVS = {
-    'gelu': gelu_prime_ev,
-    'relu': relu_prime_ev,
-    'sigmoid': partial(gauss_hermite, sigmoid_prime),
-    'swish': partial(gauss_hermite, swish_prime),
-    'tanh': partial(gauss_hermite, lambda x: 1 - np.tanh(x)**2),
+    "gelu": gelu_prime_ev,
+    "relu": relu_prime_ev,
+    "sigmoid": partial(gauss_hermite, sigmoid_prime),
+    "swish": partial(gauss_hermite, swish_prime),
+    "tanh": partial(gauss_hermite, lambda x: 1 - np.tanh(x) ** 2),
 }
 
 
 def ols(
-    W1: NDArray, 
+    W1: NDArray,
     b1: NDArray,
     W2: NDArray,
     b2: NDArray,
     *,
-    act: str = 'gelu',
+    act: str = "gelu",
     mean: NDArray | None = None,
     cov: NDArray | None = None,
     return_fvu: bool = False,
@@ -117,12 +117,14 @@ def ols(
 
     # For ReLU, we can compute the covariance matrix of the activations, which is
     # useful for computing the fraction of variance unexplained in closed form.
-    if act == 'relu' and return_fvu:
+    if act == "relu" and return_fvu:
         rhos = preact_cov / np.outer(preact_std, preact_std)
 
         # Compute the raw second moment matrix of the activations
         act_m2 = bivariate_product_moment(
-            0.0, 0.0, rhos,
+            0.0,
+            0.0,
+            rhos,
             mean_x=preact_mean[:, None],
             mean_y=preact_mean[None],
             std_x=preact_std[:, None],
@@ -156,7 +158,7 @@ def glu_mean(
     b1: ArrayLike = 0.0,
     b2: ArrayLike = 0.0,
     *,
-    act: str = 'sigmoid',
+    act: str = "sigmoid",
     mean: NDArray | None = None,
     cov: NDArray | None = None,
 ):
@@ -185,13 +187,13 @@ def glu_mean(
     z_mean = np.array(b2)
     if mean is not None:
         z_mean += V @ mean
-    
+
     try:
         act_ev = ACT_TO_EVS[act]
         act_prime_ev = ACT_TO_PRIME_EVS[act]
     except KeyError:
         raise ValueError(f"Unknown activation function: {act}")
-    
+
     # Apply Stein's lemma to compute
     # E[GLU(x)]_i = E[σ(y_i) * z_i] = Cov(σ(y_i), z_i) + E[σ(y_i)] * E[z_i]
     # The lemma says that Cov(σ(y_i), z_i) = Cov(y_i, z_i) * E[σ'(y_i)]

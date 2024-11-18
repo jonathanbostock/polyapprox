@@ -1,10 +1,10 @@
 from itertools import combinations, product
 from typing import Callable
 
+import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from scipy.special import owens_t, roots_hermite
 from scipy.stats import norm
-import numpy as np
 
 
 def bivariate_product_moment(
@@ -16,7 +16,7 @@ def bivariate_product_moment(
     mean_y: ArrayLike = 0.0,
     std_x: ArrayLike = 1.0,
     std_y: ArrayLike = 1.0,
-    unconditional = False,
+    unconditional=False,
 ):
     h = np.asarray((h - mean_x) / std_x)
     k = np.asarray((k - mean_y) / std_y)
@@ -40,16 +40,16 @@ def bivariate_product_moment(
     # Q(x): Standard normal CDF
     Q_k_given_h = 1 - norm.cdf((k - rho * h) / denom)
     Q_h_given_k = 1 - norm.cdf((h - rho * k) / denom)
-    
+
     # Compute L(h, k; rho), the probability in the truncated region
     L_hk_rho = bivariate_normal_cdf(-h, -k, rho)
-    
+
     # Product moment m11 formula
     term1 = rho * L_hk_rho
     term2 = rho * h * Z_h * Q_k_given_h
     term3 = rho * k * Z_k * Q_h_given_k
     term4 = (denom / np.sqrt(2 * np.pi)) * norm.pdf(numer / denom)
-    
+
     # Correct answer if mean_x = mean_y = 0
     m11 = std_x * std_y * (term1 + term2 + term3 + term4)
 
@@ -57,8 +57,8 @@ def bivariate_product_moment(
     # E[(s_x z_x + m_x) (s_y z_y + m_y)] =
     # s_x s_y E[z_x * z_y] + m_x s_y E[z_y] + m_y s_x E[z_x] + m_x m_y
     # Compute E[z_x] and E[z_y] using the truncated first moments
-    m10 = (Z_h * Q_k_given_h + rho * Z_k * Q_h_given_k)
-    m01 = (rho * Z_h * Q_k_given_h + Z_k * Q_h_given_k)
+    m10 = Z_h * Q_k_given_h + rho * Z_k * Q_h_given_k
+    m01 = rho * Z_h * Q_k_given_h + Z_k * Q_h_given_k
     m11 += std_x * mean_y * m10 + std_y * mean_x * m01 + mean_x * mean_y * L_hk_rho
 
     # Divide by the probability that we would end up in the truncated region
@@ -73,7 +73,7 @@ def bivariate_normal_cdf(
     y,
     rho,
     *,
-    mean_x = 0.0,
+    mean_x=0.0,
     mean_y=0.0,
     std_x=1.0,
     std_y=1.0,
@@ -150,7 +150,7 @@ def isserlis(cov: np.ndarray, indices: list[int]):
 
     This is an implementation of Isserlis' theorem, also known as Wick's formula. It is
     super-exponential in the number of indices, so it is only practical for small `n`.
-    
+
     Args:
         cov: Covariance matrix or batch of covariance matrices of shape (..., n, n).
         indices: List of indices 0 < i < n for which to compute the expectation.
@@ -166,9 +166,9 @@ def master_theorem(
     cov_x: np.ndarray,
     mu_y: np.ndarray,
     var_y: np.ndarray,
-    xcov: np.ndarray
+    xcov: np.ndarray,
 ):
-    """Reduce the multivariate integral E[g(y) * x1 * x2 ...] to k univariate integrals."""
+    """Reduce multivariate integral E[g(y) * x1 * x2 ...] to k univariate integrals."""
     *batch_shape, k = mu_x.shape
     *batch_shape2, k2, k3 = cov_x.shape
 
@@ -229,7 +229,7 @@ def master_theorem(
                         residual_indices.append(i)
                     else:
                         term = term * b[..., i]
-                
+
                 # Apply Isserlis' theorem to the residual factors
                 if residual_indices:
                     iss = isserlis(eps_cov, residual_indices)
@@ -237,7 +237,7 @@ def master_theorem(
 
                 # Add the term to the coefficient
                 coef = coef + term
-        
+
         coefs.append(coef)
 
     # Make descending order
@@ -255,7 +255,7 @@ def pair_partitions(elements: list):
     pivot = elements[0]
     for i in range(1, len(elements)):
         partner = elements[i]
-        remaining = elements[1:i] + elements[i+1:]
+        remaining = elements[1:i] + elements[i + 1 :]
 
         for rest in pair_partitions(remaining):
             yield [(pivot, partner)] + rest

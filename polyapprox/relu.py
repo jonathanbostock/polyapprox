@@ -1,9 +1,10 @@
 import math
 
+import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from scipy.special import factorial2
 from scipy.stats import norm
-import numpy as np
+
 
 def relu(x):
     """Rectified Linear Unit (ReLU) activation function"""
@@ -52,13 +53,13 @@ def relu_poly_ev(n: int, mu: ArrayLike, sigma: ArrayLike) -> NDArray:
 
     # Compute higher-order M_k recursively
     for k in range(2, n + 2):
-        M.append(-loc ** (k - 1) * phi_loc + (k - 1) * M[k - 2])
+        M.append(-(loc ** (k - 1)) * phi_loc + (k - 1) * M[k - 2])
 
     # Sum over k from 0 to n+1
     for k in range(n + 2):
         binom_coeff = math.comb(n + 1, k)
         mu_power = mu ** (n + 1 - k)
-        sigma_power = sigma ** k
+        sigma_power = sigma**k
 
         # We need to compute an "upper" integral from loc to infinity, but all the
         # formulas are for lower integrals from -infinity to loc. We compute the

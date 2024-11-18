@@ -1,8 +1,8 @@
-from hypothesis import given, strategies as st
-
+import numpy as np
+from hypothesis import given
+from hypothesis import strategies as st
 from scipy.integrate import dblquad
 from scipy.stats import multivariate_normal as mvn
-import numpy as np
 
 from polyapprox.integrate import bivariate_normal_cdf, isserlis
 
@@ -24,6 +24,10 @@ def test_isserlis():
 
     analytical = isserlis(K, [0] * 4 + [1] * 6)
     numerical, error = dblquad(
-        lambda y, x: x ** 4 * y ** 6 * mvn.pdf([x, y], cov=K), -np.inf, np.inf, -np.inf, np.inf,
+        lambda y, x: x**4 * y**6 * mvn.pdf([x, y], cov=K),
+        -np.inf,
+        np.inf,
+        -np.inf,
+        np.inf,
     )
     np.testing.assert_allclose(numerical, analytical, atol=error)
