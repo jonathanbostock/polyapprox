@@ -1,10 +1,14 @@
+import math
 from itertools import combinations, product
 from typing import Callable
 
+import array_api_compat
 import numpy as np
-from numpy.typing import ArrayLike, NDArray
+from numpy.typing import ArrayLike
 from scipy.special import owens_t, roots_hermite
 from scipy.stats import norm
+
+from .backends import ArrayType
 
 
 def bivariate_product_moment(
@@ -48,7 +52,7 @@ def bivariate_product_moment(
     term1 = rho * L_hk_rho
     term2 = rho * h * Z_h * Q_k_given_h
     term3 = rho * k * Z_k * Q_h_given_k
-    term4 = (denom / np.sqrt(2 * np.pi)) * norm.pdf(numer / denom)
+    term4 = (denom / math.sqrt(2 * math.pi)) * norm.pdf(numer / denom)
 
     # Correct answer if mean_x = mean_y = 0
     m11 = std_x * std_y * (term1 + term2 + term3 + term4)
@@ -108,7 +112,7 @@ def bivariate_normal_cdf(
     result = term1 - owens_t(x, rx) - owens_t(y, ry) - beta
 
     # Numerically stable fallback for when x and y are close to zero
-    backup = 0.25 + np.arcsin(rho) / (2 * np.pi)
+    backup = 0.25 + np.arcsin(rho) / (2 * math.pi)
     fallback = np.isclose(x, 0.0) & np.isclose(y, 0.0)
 
     return np.where(fallback, backup, result)
@@ -116,10 +120,10 @@ def bivariate_normal_cdf(
 
 def gauss_hermite(
     f: Callable,
-    mu: ArrayLike = 0.0,
-    sigma: ArrayLike = 1.0,
+    mu: ArrayType,
+    sigma: ArrayType,
     num_points: int = 50,
-) -> NDArray:
+) -> ArrayType:
     """
     Compute E[f(x)] where x ~ N(mu, sigma^2) using Gauss-Hermite quadrature.
 
@@ -131,18 +135,17 @@ def gauss_hermite(
     Returns:
     - expectations: array-like, E[f(x)] for each (mu, sigma)
     """
-    # Obtain Gauss-Hermite nodes and weights
-    nodes, weights = roots_hermite(num_points)  # Nodes: z_i, Weights: w_i
+    xp = array_api_compat.array_namespace(mu, sigma)
 
-    # Reshape for broadcasting
-    mu = np.atleast_1d(mu)
-    sigma = np.atleast_1d(sigma)
+    # Obtain Gauss-Hermite nodes and weights
+    nodes, weights = map(xp.asarray, roots_hermite(num_points))
 
     # See example in https://en.wikipedia.org/wiki/Gauss%E2%80%93Hermite_quadrature
-    grid = mu[:, None] + sigma[:, None] * np.sqrt(2) * nodes
+    grid = mu[..., None] + sigma[..., None] * math.sqrt(2) * nodes
 
     # Compute the weighted sum
-    return np.dot(f(grid), weights) / np.sqrt(np.pi)
+    prods = xp.einsum("...i,...i->...", f(grid), weights)
+    return prods / math.sqrt(math.pi)
 
 
 def isserlis(cov: np.ndarray, indices: list[int]):

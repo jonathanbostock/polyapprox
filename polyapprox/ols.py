@@ -1,9 +1,12 @@
 from dataclasses import dataclass
 from functools import partial
+from typing import Generic
 
+import array_api_compat
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
+from .backends import ArrayType
 from .extra import sigmoid, sigmoid_prime, swish, swish_prime
 from .gelu import gelu_ev, gelu_prime_ev
 from .integrate import bivariate_product_moment, gauss_hermite
@@ -11,14 +14,14 @@ from .relu import relu_ev, relu_prime_ev
 
 
 @dataclass(frozen=True)
-class OlsResult:
-    alpha: NDArray
+class OlsResult(Generic[ArrayType]):
+    alpha: ArrayType
     """Intercept of the linear model."""
 
-    beta: NDArray
+    beta: ArrayType
     """Coefficients of the linear model."""
 
-    mean: NDArray
+    mean: ArrayType
     """Mean of the output distribution."""
 
     fvu: float | None = None
@@ -27,7 +30,7 @@ class OlsResult:
     Currently only implemented for ReLU activations.
     """
 
-    def __call__(self, x: NDArray) -> NDArray:
+    def __call__(self, x: ArrayType) -> ArrayType:
         """Evaluate the linear model at the given inputs."""
         return x @ self.beta + self.alpha
 
@@ -51,16 +54,16 @@ ACT_TO_PRIME_EVS = {
 
 
 def ols(
-    W1: NDArray,
-    b1: NDArray,
-    W2: NDArray,
-    b2: NDArray,
+    W1: ArrayType,
+    b1: ArrayType,
+    W2: ArrayType,
+    b2: ArrayType,
     *,
     act: str = "gelu",
-    mean: NDArray | None = None,
-    cov: NDArray | None = None,
+    mean: ArrayType | None = None,
+    cov: ArrayType | None = None,
     return_fvu: bool = False,
-) -> OlsResult:
+) -> OlsResult[ArrayType]:
     """Ordinary least squares approximation of a single hidden layer MLP.
 
     Args:
@@ -75,6 +78,8 @@ def ols(
             This is only available for ReLU activations, and can be computationally
             expensive for large networks.
     """
+    xp = array_api_compat.array_namespace(W1, b1, W2, b2)
+
     # Preactivations are Gaussian; compute their mean and standard deviation
     if cov is not None:
         preact_cov = W1 @ cov @ W1.T
@@ -83,11 +88,11 @@ def ols(
         preact_cov = W1 @ W1.T
         cross_cov = W1.T
 
-    preact_mean = b1.copy()
-    preact_var = np.diag(preact_cov)
-    preact_std = np.sqrt(preact_var)
+    preact_mean = b1
+    preact_var = xp.diag(preact_cov)
+    preact_std = xp.sqrt(preact_var)
     if mean is not None:
-        preact_mean += W1 @ mean
+        preact_mean = preact_mean + W1 @ mean
 
     try:
         act_ev = ACT_TO_EVS[act]
@@ -107,7 +112,7 @@ def ols(
 
     # beta = Cov(x)^-1 Cov(x, f(x))
     if cov is not None:
-        beta = np.linalg.solve(cov, cross_cov)
+        beta = xp.linalg.solve(cov, cross_cov)
     else:
         beta = cross_cov
 
@@ -118,7 +123,7 @@ def ols(
     # For ReLU, we can compute the covariance matrix of the activations, which is
     # useful for computing the fraction of variance unexplained in closed form.
     if act == "relu" and return_fvu:
-        rhos = preact_cov / np.outer(preact_std, preact_std)
+        rhos = preact_cov / xp.outer(preact_std, preact_std)
 
         # Compute the raw second moment matrix of the activations
         act_m2 = bivariate_product_moment(
@@ -133,15 +138,15 @@ def ols(
         )
 
         # E[MLP(x)^T MLP(x)]
-        mlp_scale = np.trace(W2 @ act_m2 @ W2.T) + 2 * act_mean.T @ W2.T @ b2 + b2 @ b2
+        mlp_scale = xp.trace(W2 @ act_m2 @ W2.T) + 2 * act_mean.T @ W2.T @ b2 + b2 @ b2
 
         # E[g(x)^T MLP(x)] where g(x) is the linear predictor
-        x_moment = cross_cov + (np.outer(mean, output_mean) if mean is not None else 0)
-        inner_prod = np.trace(beta.T @ x_moment) + alpha.T @ output_mean
+        x_moment = cross_cov + (xp.outer(mean, output_mean) if mean is not None else 0)
+        inner_prod = xp.trace(beta.T @ x_moment) + alpha.T @ output_mean
 
         # E[g(x)^T g(x)] where g(x) is the linear predictor
         inner = 2 * mean.T @ beta @ alpha if mean is not None else 0
-        lin_scale = np.trace(beta.T @ cov @ beta) + inner + alpha.T @ alpha
+        lin_scale = xp.trace(beta.T @ cov @ beta) + inner + alpha.T @ alpha
 
         # Fraction of variance unexplained
         denom = mlp_scale - output_mean @ output_mean

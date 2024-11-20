@@ -1,32 +1,22 @@
 import math
 
-import numpy as np
-from numpy.typing import ArrayLike, NDArray
+import array_api_compat
 from scipy.special import factorial2
-from scipy.stats import norm
+
+from .backends import ArrayType, norm_cdf, norm_pdf
 
 
-def relu(x):
-    """Rectified Linear Unit (ReLU) activation function"""
-    return np.maximum(0, x)
-
-
-def relu_prime(x):
-    """Derivative of ReLU(x)"""
-    return np.where(x > 0, 1.0, 0.0)
-
-
-def relu_ev(mu, sigma):
+def relu_ev(mu: ArrayType, sigma: ArrayType) -> ArrayType:
     """Expected value of RELU(x) under N(mu, sigma)"""
-    return mu * norm.cdf(mu / sigma) + sigma * norm.pdf(mu / sigma)
+    return mu * norm_cdf(mu / sigma) + sigma * norm_pdf(mu / sigma)
 
 
-def relu_prime_ev(mu, sigma):
+def relu_prime_ev(mu: ArrayType, sigma: ArrayType) -> ArrayType:
     """Expected value of RELU'(x) under N(mu, sigma)"""
-    return norm.cdf(mu / sigma)
+    return norm_cdf(mu / sigma)
 
 
-def relu_poly_ev(n: int, mu: ArrayLike, sigma: ArrayLike) -> NDArray:
+def relu_poly_ev(n: int, mu: ArrayType, sigma: ArrayType) -> ArrayType:
     """
     Compute E[x^n * ReLU(x)] analytically where x ~ N(mu, sigma^2)
 
@@ -38,15 +28,14 @@ def relu_poly_ev(n: int, mu: ArrayLike, sigma: ArrayLike) -> NDArray:
     Returns:
     result : NDArray, the computed expected value(s)
     """
-    mu = np.asarray(mu)
-    sigma = np.asarray(sigma)
+    xp = array_api_compat.array_namespace(mu, sigma)
 
     loc = -mu / sigma
-    expected_value = np.zeros_like(mu)
+    expected_value = xp.zeros_like(mu)
 
     # Precompute standard normal PDF and CDF at loc
-    phi_loc = norm.pdf(loc)  # PDF of standard normal at loc
-    Phi_loc = norm.cdf(loc)  # CDF of standard normal at loc
+    phi_loc = norm_pdf(loc)  # PDF of standard normal at loc
+    Phi_loc = norm_cdf(loc)  # CDF of standard normal at loc
 
     # Compute M_0 and M_1
     M = [Phi_loc, -phi_loc]
