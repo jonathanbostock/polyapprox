@@ -41,12 +41,23 @@ class OlsResult(Generic[ArrayType]):
         y = x @ self.beta + self.alpha
 
         if self.gamma is not None:
-            outer = xp.einsum("ij,ik->ijk", x, x)
-
-            rows, cols = map(xp.asarray, np.tril_indices(x.shape[1]))
-            y += outer[:, rows, cols] @ self.gamma.T
+            a = xp.einsum("bi,hij->bhj", x, self.unpack_gamma())
+            y += xp.einsum("bj,bhj->bh", x, a)
 
         return y
+
+    def unpack_gamma(self) -> ArrayType:
+        """Unpack gamma into a full stack of matrices."""
+        if self.gamma is None:
+            raise ValueError("No second-order interactions available")
+
+        d_input, d_out = self.beta.shape
+        xp = array_api_compat.get_namespace(self.gamma)
+
+        rows, cols = map(xp.asarray, np.tril_indices(d_input))
+        gamma = xp.zeros((d_out, d_input, d_input))
+        gamma[:, rows, cols] = self.gamma
+        return 0.5 * (gamma + gamma.transpose(0, 2, 1))
 
 
 # Mapping from activation functions to EVs
