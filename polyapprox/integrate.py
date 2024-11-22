@@ -148,7 +148,7 @@ def gauss_hermite(
     return prods / math.sqrt(math.pi)
 
 
-def isserlis(cov: np.ndarray, indices: list[int]):
+def isserlis(cov: ArrayType, indices: list[int]) -> ArrayType:
     """Compute `E[prod_{i=1}^n X_i]` for jointly Gaussian X_i with covariance `cov`.
 
     This is an implementation of Isserlis' theorem, also known as Wick's formula. It is
@@ -158,20 +158,53 @@ def isserlis(cov: np.ndarray, indices: list[int]):
         cov: Covariance matrix or batch of covariance matrices of shape (..., n, n).
         indices: List of indices 0 < i < n for which to compute the expectation.
     """
-    return sum(
-        np.prod([cov[..., a, b] for a, b in partition], axis=0)
-        for partition in pair_partitions(indices)
-    )
+    xp = array_api_compat.array_namespace(cov)
+    res = xp.zeros(cov.shape[:-2])
+
+    for partition in pair_partitions(indices):
+        res += xp.prod([cov[..., a, b] for a, b in partition], axis=0)
+
+    return res
+
+
+def noncentral_isserlis(
+    cov: ArrayType, mean: ArrayType, indices: list[int] = []
+) -> ArrayType:
+    """Compute E[X1 * X2 * ... * Xd] for a noncentral multivariate Gaussian."""
+    d = len(indices) or mean.shape[-1]
+    xp = array_api_compat.array_namespace(cov, mean)
+    ev = xp.zeros(cov.shape[:-2])
+
+    # Iterate over even orders, since the odd orders will be zero
+    for k in range(0, d + 1, 2):
+        # Iterate over all combinations of k unique indices
+        for comb in combinations(range(d), k):
+            # Get a list of indices that are left over. The correctness of this
+            # depends on combinations returning the indices in sorted order.
+            remaining = list(range(d))
+            for idx in reversed(comb):
+                del remaining[idx]
+
+            if indices:
+                remaining = [indices[i] for i in remaining]
+                comb = [indices[i] for i in comb]
+
+            const = xp.prod([mean[..., i] for i in remaining], axis=0)
+            ev += const * isserlis(cov, list(comb))
+
+    return ev
 
 
 def master_theorem(
-    mu_x: np.ndarray,
-    cov_x: np.ndarray,
-    mu_y: np.ndarray,
-    var_y: np.ndarray,
-    xcov: np.ndarray,
-):
+    mu_x: ArrayType,
+    cov_x: ArrayType,
+    mu_y: ArrayType,
+    var_y: ArrayType,
+    xcov: ArrayType,
+) -> list[ArrayType]:
     """Reduce multivariate integral E[g(y) * x1 * x2 ...] to k univariate integrals."""
+    xp = array_api_compat.array_namespace(mu_x, cov_x, mu_y, var_y, xcov)
+
     *batch_shape, k = mu_x.shape
     *batch_shape2, k2, k3 = cov_x.shape
 
@@ -181,7 +214,7 @@ def master_theorem(
     # TODO: Make this work for constant X0 by choosing a "pivot" variable
     # from among the X_i with the largest variance, then computing all the
     # conditional expectations with respect to that variable.
-    assert np.all(var_y > 0.0), "X0 must have positive variance"
+    assert xp.all(var_y > 0.0), "X0 must have positive variance"
 
     # Coefficients and intercepts for each conditional expectation
     a = xcov / var_y[..., None]
@@ -196,11 +229,11 @@ def master_theorem(
     # Iterate over polynomial terms
     for m in range(k + 1):
         # Running sum of terms in the coefficient
-        coef = np.zeros(batch_shape)
+        coef = xp.zeros(batch_shape)
 
         # Enumerate every combination of m unique a terms
         for comb in combinations(range(k), m):
-            prefix = np.ones(batch_shape)
+            prefix = xp.ones(batch_shape)
 
             # Multiply together the a terms
             for i in comb:

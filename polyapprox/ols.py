@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from functools import partial
-from typing import Generic
+from typing import Generic, Literal
 
 import array_api_compat
 import numpy as np
@@ -8,9 +8,13 @@ from numpy.typing import ArrayLike, NDArray
 
 from .backends import ArrayType
 from .extra import sigmoid, sigmoid_prime, swish, swish_prime
-from .gelu import gelu_ev, gelu_prime_ev
-from .integrate import bivariate_product_moment, gauss_hermite
-from .relu import relu_ev, relu_prime_ev
+from .gelu import gelu_ev, gelu_poly_ev, gelu_prime_ev
+from .integrate import (
+    bivariate_product_moment,
+    gauss_hermite,
+    master_theorem,
+)
+from .relu import relu_ev, relu_poly_ev, relu_prime_ev
 
 
 @dataclass(frozen=True)
@@ -21,8 +25,8 @@ class OlsResult(Generic[ArrayType]):
     beta: ArrayType
     """Coefficients of the linear model."""
 
-    mean: ArrayType
-    """Mean of the output distribution."""
+    gamma: ArrayType | None = None
+    """Coefficients for second-order interactions, if available."""
 
     fvu: float | None = None
     """Fraction of variance unexplained, if available.
@@ -32,7 +36,27 @@ class OlsResult(Generic[ArrayType]):
 
     def __call__(self, x: ArrayType) -> ArrayType:
         """Evaluate the linear model at the given inputs."""
-        return x @ self.beta + self.alpha
+        xp = array_api_compat.get_namespace(x)
+        y = x @ self.beta + self.alpha
+
+        if self.gamma is not None:
+            a = xp.einsum("bi,hij->bhj", x, self.unpack_gamma())
+            y += xp.einsum("bj,bhj->bh", x, a)
+
+        return y
+
+    def unpack_gamma(self) -> ArrayType:
+        """Unpack gamma into a full stack of matrices."""
+        if self.gamma is None:
+            raise ValueError("No second-order interactions available")
+
+        d_input, d_out = self.beta.shape
+        xp = array_api_compat.get_namespace(self.gamma)
+
+        rows, cols = map(xp.asarray, np.tril_indices(d_input))
+        gamma = xp.zeros((d_out, d_input, d_input))
+        gamma[:, rows, cols] = self.gamma
+        return 0.5 * (gamma + gamma.transpose(0, 2, 1))
 
 
 # Mapping from activation functions to EVs
@@ -51,6 +75,10 @@ ACT_TO_PRIME_EVS = {
     "swish": partial(gauss_hermite, swish_prime),
     "tanh": partial(gauss_hermite, lambda x: 1 - np.tanh(x) ** 2),
 }
+ACT_TO_POLY_EVS = {
+    "gelu": gelu_poly_ev,
+    "relu": relu_poly_ev,
+}
 
 
 def ols(
@@ -62,6 +90,7 @@ def ols(
     act: str = "gelu",
     mean: ArrayType | None = None,
     cov: ArrayType | None = None,
+    order: Literal["linear", "quadratic"] = "linear",
     return_fvu: bool = False,
 ) -> OlsResult[ArrayType]:
     """Ordinary least squares approximation of a single hidden layer MLP.
@@ -78,6 +107,7 @@ def ols(
             This is only available for ReLU activations, and can be computationally
             expensive for large networks.
     """
+    d_input = W1.shape[1]
     xp = array_api_compat.array_namespace(W1, b1, W2, b2)
 
     # Preactivations are Gaussian; compute their mean and standard deviation
@@ -103,8 +133,8 @@ def ols(
     # Apply Stein's lemma to compute cross-covariance of the input
     # with the activations. We need the expected derivative of the
     # activation function with respect to the preactivation.
-    act_mean = act_prime_ev(preact_mean, preact_std)
-    cross_cov = (cross_cov * act_mean) @ W2.T
+    act_prime_mean = act_prime_ev(preact_mean, preact_std)
+    output_cross_cov = (cross_cov * act_prime_mean) @ W2.T
 
     # Compute expectation of act_fn(x) for each preactivation
     act_mean = act_ev(preact_mean, preact_std)
@@ -112,17 +142,92 @@ def ols(
 
     # beta = Cov(x)^-1 Cov(x, f(x))
     if cov is not None:
-        beta = xp.linalg.solve(cov, cross_cov)
+        beta = xp.linalg.solve(cov, output_cross_cov)
     else:
-        beta = cross_cov
+        beta = output_cross_cov
 
     alpha = output_mean
     if mean is not None:
         alpha -= beta.T @ mean
 
+    if order == "quadratic":
+        # Get indices to all unique pairs of input dimensions
+        rows, cols = map(xp.asarray, np.tril_indices(d_input))
+
+        # TODO: Support non-zero means and non-diagonal covariances
+        assert cov is None and mean is None
+        sigma = xp.eye(d_input)
+        mu = xp.zeros(d_input)
+
+        # "Expand" our covariance and cross-covariance matrices into a batch of 2x2
+        # and 2x1 matrices, respectively, to apply the master theorem. Each matrix
+        # corresponds to a pairing of two input dimensions. We do a similar thing
+        # for the means, which are 1D vectors.
+        expanded_cov = xp.array(
+            [
+                [sigma[rows, rows], sigma[rows, cols]],
+                [sigma[cols, rows], sigma[cols, cols]],
+            ]
+        ).T
+        expanded_xcov = xp.array(
+            [
+                cross_cov[rows],
+                cross_cov[cols],
+            ]
+        ).T
+        expanded_mean = xp.array([mu[rows], mu[cols]]).T
+
+        coefs = master_theorem(
+            # Add an extra singleton dimension so that we can broadcast across all the
+            # pairings of input dimensions
+            mu_y=preact_mean[..., None],
+            var_y=preact_var[..., None],
+            cov_x=expanded_cov,
+            xcov=expanded_xcov,
+            mu_x=expanded_mean,
+        )
+
+        # Compute univariate integrals
+        try:
+            poly_ev = ACT_TO_POLY_EVS[act]
+        except KeyError:
+            raise ValueError(f"Quadratic not implemented for activation: {act}")
+
+        quad = poly_ev(2, preact_mean, preact_std)
+        lin = poly_ev(1, preact_mean, preact_std)
+        const = poly_ev(0, preact_mean, preact_std)
+        E_gy_x1x2 = (
+            coefs[0] * quad[:, None]
+            + coefs[1] * lin[:, None]
+            + coefs[2] * const[:, None]
+        )
+
+        # TODO: Make this actually work for nontrivial mean and cov
+        # Compute the mean and covariance matrix of the input features
+        # (products of potentially non-central jointly Gaussian variables)
+        # feature_mean = noncentral_isserlis(expanded_cov, expanded_mean)
+
+        # Where rows == cols, E[x * y] = E[x^2] = 1
+        # Where rows != cols, E[x * y] = E[x] * E[y] = 0
+        feature_mean = rows == cols
+
+        # Where rows == cols, Var[x * y] = Var[x^2] = E[x^4] - E[x^2]^2 = 3 - 1 = 2
+        # Where rows != cols, Var[x * y] = E[x^2 * y^2] - E[x * y]^2 = 1 - 0 = 1
+        feature_var = 1 + (rows == cols)
+
+        quad_xcov = W2 @ (E_gy_x1x2 - xp.outer(const, feature_mean))
+        gamma = quad_xcov / feature_var
+
+        # adjust constant term
+        alpha -= feature_mean @ gamma.T
+    else:
+        gamma = None
+
     # For ReLU, we can compute the covariance matrix of the activations, which is
     # useful for computing the fraction of variance unexplained in closed form.
     if act == "relu" and return_fvu:
+        # TODO: Figure out what is wrong with our implementation for non-zero means
+        assert mean is None, "FVU computation is not implemented for non-zero means"
         rhos = preact_cov / xp.outer(preact_std, preact_std)
 
         # Compute the raw second moment matrix of the activations
@@ -145,6 +250,7 @@ def ols(
         inner_prod = xp.trace(beta.T @ x_moment) + alpha.T @ output_mean
 
         # E[g(x)^T g(x)] where g(x) is the linear predictor
+        cov = cov if cov is not None else xp.eye(d_input)
         inner = 2 * mean.T @ beta @ alpha if mean is not None else 0
         lin_scale = xp.trace(beta.T @ cov @ beta) + inner + alpha.T @ alpha
 
@@ -154,7 +260,7 @@ def ols(
     else:
         fvu = None
 
-    return OlsResult(alpha, beta, output_mean, fvu=fvu)
+    return OlsResult(alpha, beta, fvu=fvu, gamma=gamma)
 
 
 def glu_mean(
