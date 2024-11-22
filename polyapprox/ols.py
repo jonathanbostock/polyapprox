@@ -13,7 +13,6 @@ from .integrate import (
     bivariate_product_moment,
     gauss_hermite,
     master_theorem,
-    noncentral_isserlis,
 )
 from .relu import relu_ev, relu_poly_ev, relu_prime_ev
 
@@ -155,8 +154,10 @@ def ols(
         # Get indices to all unique pairs of input dimensions
         rows, cols = map(xp.asarray, np.tril_indices(d_input))
 
-        cov = cov if cov is not None else xp.eye(d_input)
-        mu = mean if mean is not None else xp.zeros(d_input)
+        # TODO: Support non-zero means and non-diagonal covariances
+        assert cov is None and mean is None
+        sigma = xp.eye(d_input)
+        mu = xp.zeros(d_input)
 
         # "Expand" our covariance and cross-covariance matrices into a batch of 2x2
         # and 2x1 matrices, respectively, to apply the master theorem. Each matrix
@@ -164,8 +165,8 @@ def ols(
         # for the means, which are 1D vectors.
         expanded_cov = xp.array(
             [
-                [cov[rows, rows], cov[rows, cols]],
-                [cov[cols, rows], cov[cols, cols]],
+                [sigma[rows, rows], sigma[rows, cols]],
+                [sigma[cols, rows], sigma[cols, cols]],
             ]
         ).T
         expanded_xcov = xp.array(
@@ -201,12 +202,21 @@ def ols(
             + coefs[2] * const[:, None]
         )
 
+        # TODO: Make this actually work for nontrivial mean and cov
         # Compute the mean and covariance matrix of the input features
         # (products of potentially non-central jointly Gaussian variables)
-        feature_mean = noncentral_isserlis(expanded_cov, expanded_mean)
+        # feature_mean = noncentral_isserlis(expanded_cov, expanded_mean)
+
+        # Where rows == cols, E[x * y] = E[x^2] = 1
+        # Where rows != cols, E[x * y] = E[x] * E[y] = 0
+        feature_mean = rows == cols
+
+        # Where rows == cols, Var[x * y] = Var[x^2] = E[x^4] - E[x^2]^2 = 3 - 1 = 2
+        # Where rows != cols, Var[x * y] = E[x^2 * y^2] - E[x * y]^2 = 1 - 0 = 1
+        feature_var = 1 + (rows == cols)
 
         quad_xcov = W2 @ (E_gy_x1x2 - xp.outer(const, feature_mean))
-        gamma = quad_xcov / (1 + (rows == cols))
+        gamma = quad_xcov / feature_var
 
         # adjust constant term
         alpha -= feature_mean @ gamma.T

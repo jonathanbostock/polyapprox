@@ -167,10 +167,13 @@ def isserlis(cov: ArrayType, indices: list[int]) -> ArrayType:
     return res
 
 
-def noncentral_isserlis(cov: np.ndarray, mean: np.ndarray, indices: list[int] = []):
+def noncentral_isserlis(
+    cov: ArrayType, mean: ArrayType, indices: list[int] = []
+) -> ArrayType:
     """Compute E[X1 * X2 * ... * Xd] for a noncentral multivariate Gaussian."""
     d = len(indices) or mean.shape[-1]
-    ev = 0.0
+    xp = array_api_compat.array_namespace(cov, mean)
+    ev = xp.zeros(cov.shape[:-2])
 
     # Iterate over even orders, since the odd orders will be zero
     for k in range(0, d + 1, 2):
@@ -186,7 +189,7 @@ def noncentral_isserlis(cov: np.ndarray, mean: np.ndarray, indices: list[int] = 
                 remaining = [indices[i] for i in remaining]
                 comb = [indices[i] for i in comb]
 
-            const = np.prod([mean[..., i] for i in remaining], axis=0)
+            const = xp.prod([mean[..., i] for i in remaining], axis=0)
             ev += const * isserlis(cov, list(comb))
 
     return ev
