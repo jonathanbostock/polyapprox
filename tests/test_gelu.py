@@ -1,3 +1,5 @@
+from functools import partial
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -29,7 +31,7 @@ def test_gelu_evs(mu, sigma):
         lambda x: gelu(x) * norm.pdf(x, loc=mu, scale=sigma), -np.inf, np.inf
     )
     np.testing.assert_allclose(numerical_ev, analytic_ev, atol=err)
-    torch_test(gelu_ev, analytic_ev, mu, sigma, atol=err)
+    torch_test(gelu_ev, numerical_ev, mu, sigma, atol=err)
 
 
 @given(st.floats(-4, 4), st.floats(0.1, 10))
@@ -41,7 +43,7 @@ def test_gelu_prime_evs(mu, sigma):
         np.inf,
     )
     np.testing.assert_allclose(numerical_ev, analytic_ev, atol=err)
-    torch_test(gelu_prime_ev, analytic_ev, mu, sigma, atol=err)
+    torch_test(gelu_prime_ev, numerical_ev, mu, sigma, atol=err)
 
 
 @given(st.integers(0, 5), st.floats(-4, 4), st.floats(0.1, 10))
@@ -53,3 +55,4 @@ def test_gelu_poly_evs(n, mu, sigma):
         np.inf,
     )
     np.testing.assert_allclose(numerical_ev, analytic_ev, atol=err)
+    torch_test(partial(gelu_poly_ev, n), numerical_ev, mu, sigma, atol=err)

@@ -1,3 +1,5 @@
+from functools import partial
+
 import numpy as np
 import torch
 from hypothesis import given
@@ -30,7 +32,7 @@ def test_relu_evs(mu, sigma):
         lambda x: relu(x) * norm.pdf(x, loc=mu, scale=sigma), -np.inf, np.inf
     )
     np.testing.assert_allclose(numerical_ev, analytic_ev, atol=err)
-    torch_test(relu_ev, analytic_ev, mu, sigma, atol=err)
+    torch_test(relu_ev, numerical_ev, mu, sigma, atol=err)
 
 
 @given(st.floats(-4, 4), st.floats(0.1, 10))
@@ -42,7 +44,7 @@ def test_relu_prime_evs(mu, sigma):
         np.inf,
     )
     np.testing.assert_allclose(numerical_ev, analytic_ev, atol=err)
-    torch_test(relu_prime_ev, analytic_ev, mu, sigma, atol=err)
+    torch_test(relu_prime_ev, numerical_ev, mu, sigma, atol=err)
 
 
 @given(st.integers(0, 5), st.floats(-4, 4), st.floats(0.1, 10))
@@ -55,4 +57,5 @@ def test_relu_poly_evs(n, mu, sigma):
     )
     # Don't use relative tolerance because the expected value can be very small.
     # The sharpness of ReLU also makes quad have a hard time estimating the error.
-    assert abs(numerical_ev - analytic_ev) < np.finfo(float).eps + err
+    assert abs(numerical_ev - analytic_ev) < 1e-15 + err
+    torch_test(partial(relu_poly_ev, n), numerical_ev, mu, sigma, atol=1e-15 + err)
