@@ -4,10 +4,17 @@ from typing import Generic, Literal
 
 import array_api_compat
 import numpy as np
-from numpy.typing import ArrayLike, NDArray
 
 from .backends import ArrayType
-from .extra import sigmoid, sigmoid_prime, swish, swish_prime
+from .extra import (
+    id_poly_ev,
+    sigmoid,
+    sigmoid_poly_ev,
+    sigmoid_prime,
+    swish,
+    swish_poly_ev,
+    swish_prime,
+)
 from .gelu import gelu_ev, gelu_poly_ev, gelu_prime_ev
 from .integrate import (
     bivariate_product_moment,
@@ -54,14 +61,15 @@ class OlsResult(Generic[ArrayType]):
         xp = array_api_compat.get_namespace(self.gamma)
 
         rows, cols = map(xp.asarray, np.tril_indices(d_input))
-        gamma = xp.zeros((d_out, d_input, d_input))
+        gamma = xp.zeros((d_out, d_input, d_input), dtype=self.gamma.dtype)
         gamma[:, rows, cols] = self.gamma
-        return 0.5 * (gamma + gamma.transpose(0, 2, 1))
+        return 0.5 * (gamma + xp.permute_dims(gamma, (0, 2, 1)))
 
 
 # Mapping from activation functions to EVs
 ACT_TO_EVS = {
     "gelu": gelu_ev,
+    "identity": lambda mu, sigma: mu,
     "relu": relu_ev,
     "sigmoid": partial(gauss_hermite, sigmoid),
     "swish": partial(gauss_hermite, swish),
@@ -70,6 +78,7 @@ ACT_TO_EVS = {
 # Mapping from activation functions to EVs of their derivatives
 ACT_TO_PRIME_EVS = {
     "gelu": gelu_prime_ev,
+    "identity": lambda mu, sigma: 1.0,
     "relu": relu_prime_ev,
     "sigmoid": partial(gauss_hermite, sigmoid_prime),
     "swish": partial(gauss_hermite, swish_prime),
@@ -77,7 +86,10 @@ ACT_TO_PRIME_EVS = {
 }
 ACT_TO_POLY_EVS = {
     "gelu": gelu_poly_ev,
+    "identity": id_poly_ev,
     "relu": relu_poly_ev,
+    "sigmoid": sigmoid_poly_ev,
+    "swish": swish_poly_ev,
 }
 
 
@@ -163,28 +175,28 @@ def ols(
         # and 2x1 matrices, respectively, to apply the master theorem. Each matrix
         # corresponds to a pairing of two input dimensions. We do a similar thing
         # for the means, which are 1D vectors.
-        expanded_cov = xp.array(
+        expanded_cov = xp.stack(
             [
-                [sigma[rows, rows], sigma[rows, cols]],
-                [sigma[cols, rows], sigma[cols, cols]],
+                xp.stack([sigma[rows, rows], sigma[rows, cols]]),
+                xp.stack([sigma[cols, rows], sigma[cols, cols]]),
             ]
         ).T
-        expanded_xcov = xp.array(
+        expanded_xcov = xp.stack(
             [
                 cross_cov[rows],
                 cross_cov[cols],
             ]
         ).T
-        expanded_mean = xp.array([mu[rows], mu[cols]]).T
+        expanded_mean = xp.stack([mu[rows], mu[cols]]).T
 
         coefs = master_theorem(
             # Add an extra singleton dimension so that we can broadcast across all the
             # pairings of input dimensions
-            mu_y=preact_mean[..., None],
-            var_y=preact_var[..., None],
-            cov_x=expanded_cov,
+            mu_x=preact_mean[..., None],
+            var_x=preact_var[..., None],
+            cov_y=expanded_cov,
             xcov=expanded_xcov,
-            mu_x=expanded_mean,
+            mu_y=expanded_mean,
         )
 
         # Compute univariate integrals
@@ -209,7 +221,7 @@ def ols(
 
         # Where rows == cols, E[x * y] = E[x^2] = 1
         # Where rows != cols, E[x * y] = E[x] * E[y] = 0
-        feature_mean = rows == cols
+        feature_mean = xp.astype(rows == cols, W2.dtype)
 
         # Where rows == cols, Var[x * y] = Var[x^2] = E[x^4] - E[x^2]^2 = 3 - 1 = 2
         # Where rows != cols, Var[x * y] = E[x^2 * y^2] - E[x * y]^2 = 1 - 0 = 1
@@ -263,45 +275,46 @@ def ols(
     return OlsResult(alpha, beta, fvu=fvu, gamma=gamma)
 
 
-def glu_mean(
-    W: NDArray,
-    V: NDArray,
-    b1: ArrayLike = 0.0,
-    b2: ArrayLike = 0.0,
+def glu_ols(
+    W: ArrayType,
+    V: ArrayType,
+    b1: ArrayType,
+    b2: ArrayType,
+    W2: ArrayType | None = None,
     *,
     act: str = "sigmoid",
-    mean: NDArray | None = None,
-    cov: NDArray | None = None,
+    mean: ArrayType | None = None,
+    cov: ArrayType | None = None,
 ):
     """Analytically compute the mean output of a gated linear unit (GLU).
 
     See "GLU Variants Improve Transformer" <https://arxiv.org/abs/2002.05202>
     by Shazeer (2020) for more details.
     """
+    xp = array_api_compat.array_namespace(W, V, b1, b2)
+    if cov is None:
+        cov = xp.eye(len(b1))
+    if mean is None:
+        mean = xp.zeros(len(b1))
+
+    assert cov is not None and mean is not None
+
     # The network takes the form σ(W @ x + b1) * (V @ x + b2)
     # Let y = W @ x + b1 and z = V @ x + b2
-    if cov is not None:
-        # Cross-covariance matrix of y and z
-        cross_cov = W @ cov @ V.T
+    cov_xz = cov @ V.T
+    cov_yx = W @ cov
+    cov_yz = xp.diag(W @ cov @ V.T)  # We only need the diagonal
+    cov_zz = V @ cov @ V.T
 
-        y_std = np.diag(W @ cov @ W.T) ** 0.5
-        # z_std = np.diag(V @ cov @ V.T) ** 0.5
-    else:
-        cross_cov = W @ V.T
-        y_std = np.linalg.norm(W, axis=1)
-        # z_std = np.linalg.norm(V, axis=1)
+    y_std = xp.diag(W @ cov @ W.T) ** 0.5
 
-    y_mean = np.array(b1)
-    if mean is not None:
-        y_mean += W @ mean
-
-    z_mean = np.array(b2)
-    if mean is not None:
-        z_mean += V @ mean
+    y_mean = xp.asarray(b1) + W @ mean
+    z_mean = xp.asarray(b2) + V @ mean
 
     try:
         act_ev = ACT_TO_EVS[act]
         act_prime_ev = ACT_TO_PRIME_EVS[act]
+        poly_ev = ACT_TO_POLY_EVS[act]
     except KeyError:
         raise ValueError(f"Unknown activation function: {act}")
 
@@ -310,6 +323,48 @@ def glu_mean(
     # The lemma says that Cov(σ(y_i), z_i) = Cov(y_i, z_i) * E[σ'(y_i)]
     # so we need to compute E[σ'(y_i)] for each i
     act_mean = act_ev(y_mean, y_std)
-    output_mean = np.diag(cross_cov) * act_prime_ev(y_mean, y_std) + act_mean * z_mean
+    out_mean = cov_yz * act_prime_ev(y_mean, y_std) + act_mean * z_mean
+    if W2 is not None:
+        out_mean = W2 @ out_mean
 
-    return output_mean
+    # Apply the master theorem to the integral E[σ(y_i) * z_i * x_j] for each i, j
+    # The resulting coefficients have the same shape as cov_xz
+    quad = poly_ev(2, y_mean, y_std)
+    lin = poly_ev(1, y_mean, y_std)
+    const = poly_ev(0, y_mean, y_std)
+
+    var_x = np.broadcast_to(xp.diag(cov)[..., None], cov_xz.shape)
+    var_z = np.broadcast_to(xp.diag(cov_zz)[None], cov_xz.shape)
+    cov_rest = xp.asarray(
+        [
+            xp.stack([var_z, cov_xz]),
+            xp.stack([cov_xz, var_x]),
+        ]
+    ).T
+    mu_rest = xp.asarray(
+        [
+            np.broadcast_to(z_mean[None], cov_xz.shape),
+            np.broadcast_to(mean[..., None], cov_xz.shape),
+        ]
+    ).T
+    xcov = xp.stack(
+        [
+            np.broadcast_to(cov_yz[..., None], cov_yx.shape),
+            cov_yx,
+        ],
+        axis=-1,
+    )
+    coefs = master_theorem(
+        mu_x=y_mean[..., None],
+        var_x=y_std[..., None] ** 2,
+        mu_y=mu_rest,
+        cov_y=cov_rest,
+        xcov=xcov,
+    )
+    feature_xcov = (
+        coefs[0] * quad[:, None] + coefs[1] * lin[:, None] + coefs[2] * const[:, None]
+    )
+    beta = (feature_xcov - xp.outer(out_mean, mean)).T
+    alpha = out_mean - mean @ beta
+
+    return OlsResult(alpha, beta)

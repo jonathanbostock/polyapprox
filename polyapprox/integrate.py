@@ -162,7 +162,7 @@ def isserlis(cov: ArrayType, indices: list[int]) -> ArrayType:
     res = xp.zeros(cov.shape[:-2])
 
     for partition in pair_partitions(indices):
-        res += xp.prod([cov[..., a, b] for a, b in partition], axis=0)
+        res += xp.prod(xp.stack([cov[..., a, b] for a, b in partition]), axis=0)
 
     return res
 
@@ -197,31 +197,31 @@ def noncentral_isserlis(
 
 def master_theorem(
     mu_x: ArrayType,
-    cov_x: ArrayType,
+    var_x: ArrayType,
     mu_y: ArrayType,
-    var_y: ArrayType,
+    cov_y: ArrayType,
     xcov: ArrayType,
 ) -> list[ArrayType]:
-    """Reduce multivariate integral E[g(y) * x1 * x2 ...] to k univariate integrals."""
-    xp = array_api_compat.array_namespace(mu_x, cov_x, mu_y, var_y, xcov)
+    """Reduce multivariate integral E[g(x) * y1 * y2 ...] to k univariate integrals."""
+    xp = array_api_compat.array_namespace(mu_y, cov_y, mu_x, var_x, xcov)
 
-    *batch_shape, k = mu_x.shape
-    *batch_shape2, k2, k3 = cov_x.shape
+    *batch_shape, k = mu_y.shape
+    *batch_shape2, k2, k3 = cov_y.shape
 
     assert batch_shape == batch_shape2, "Batch dimensions must match"
     assert k == k2 == k3, "Dimension of means and covariances must match"
 
-    # TODO: Make this work for constant X0 by choosing a "pivot" variable
-    # from among the X_i with the largest variance, then computing all the
+    # TODO: Make this work for constant X by choosing a "pivot" variable
+    # from among the Y_i with the largest variance, then computing all the
     # conditional expectations with respect to that variable.
-    assert xp.all(var_y > 0.0), "X0 must have positive variance"
+    assert xp.all(var_x > 0.0), "X must have positive variance"
 
     # Coefficients and intercepts for each conditional expectation
-    a = xcov / var_y[..., None]
-    b = -a * mu_y[..., None] + mu_x
+    a = xcov / var_x[..., None]
+    b = -a * mu_x[..., None] + mu_y
 
     # Covariance matrix of the residuals
-    eps_cov = cov_x - xcov[..., None] * a[..., None, :]
+    eps_cov = cov_y - xcov[..., None] * a[..., None, :]
 
     # Polynomial coefficients get appended here
     coefs = []

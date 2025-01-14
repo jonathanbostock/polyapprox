@@ -8,7 +8,12 @@ from scipy.stats import norm
 
 from polyapprox.extra import sigmoid, swish
 from polyapprox.gelu import gelu
-from polyapprox.integrate import bivariate_normal_cdf, gauss_hermite, isserlis
+from polyapprox.integrate import (
+    bivariate_normal_cdf,
+    gauss_hermite,
+    isserlis,
+    master_theorem,
+)
 
 
 @given(st.floats(-0.999, 0.999), st.floats(-1e6, 1e6), st.floats(-1e6, 1e6))
@@ -46,6 +51,21 @@ def test_isserlis():
     K = B @ B.T
 
     analytical = isserlis(K, [0] * 4 + [1] * 6)
+    numerical, error = dblquad(
+        lambda y, x: x**4 * y**6 * mvn.pdf([x, y], cov=K),
+        -np.inf,
+        np.inf,
+        -np.inf,
+        np.inf,
+    )
+    np.testing.assert_allclose(numerical, analytical, atol=error)
+
+
+def test_master_theorem():
+    B = np.random.randn(2, 2) / np.sqrt(2)
+    K = B @ B.T
+
+    analytical = master_theorem(K, [0] * 4 + [1] * 6)
     numerical, error = dblquad(
         lambda y, x: x**4 * y**6 * mvn.pdf([x, y], cov=K),
         -np.inf,

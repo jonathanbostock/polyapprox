@@ -17,11 +17,6 @@ def gelu_prime(x: ArrayType) -> ArrayType:
     return norm_cdf(x) + x * norm_pdf(x)
 
 
-def gelu_dbl_prime(x: ArrayType) -> ArrayType:
-    """Second derivative of GELU(x)"""
-    return (2 - x**2) * norm_pdf(x)
-
-
 def gelu_ev(mu: ArrayType, sigma: ArrayType) -> ArrayType:
     """Expected value of GELU(x) under N(mu, sigma)"""
     denom = (1 + sigma**2) ** 0.5
