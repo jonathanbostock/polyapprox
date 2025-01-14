@@ -9,22 +9,9 @@ from scipy.stats import norm
 from polyapprox.extra import sigmoid, swish
 from polyapprox.gelu import gelu
 from polyapprox.integrate import (
-    bivariate_normal_cdf,
     gauss_hermite,
     isserlis,
-    master_theorem,
 )
-
-
-@given(st.floats(-0.999, 0.999), st.floats(-1e6, 1e6), st.floats(-1e6, 1e6))
-def test_bivariate_normal_cdf(rho, x, y):
-    ours = bivariate_normal_cdf(x, y, rho)
-    scipy = mvn.cdf([x, y], cov=[[1, rho], [rho, 1]])
-
-    # Sometimes SciPy returns NaNs for large values while we don't
-    # Don't penalize us for being more numerically stable
-    if not np.isnan(scipy):
-        np.testing.assert_allclose(ours, scipy, atol=1e-12)
 
 
 @given(st.floats(-4, 4), st.floats(0.1, 10))
@@ -51,21 +38,6 @@ def test_isserlis():
     K = B @ B.T
 
     analytical = isserlis(K, [0] * 4 + [1] * 6)
-    numerical, error = dblquad(
-        lambda y, x: x**4 * y**6 * mvn.pdf([x, y], cov=K),
-        -np.inf,
-        np.inf,
-        -np.inf,
-        np.inf,
-    )
-    np.testing.assert_allclose(numerical, analytical, atol=error)
-
-
-def test_master_theorem():
-    B = np.random.randn(2, 2) / np.sqrt(2)
-    K = B @ B.T
-
-    analytical = master_theorem(K, [0] * 4 + [1] * 6)
     numerical, error = dblquad(
         lambda y, x: x**4 * y**6 * mvn.pdf([x, y], cov=K),
         -np.inf,

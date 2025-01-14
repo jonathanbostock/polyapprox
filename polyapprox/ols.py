@@ -17,7 +17,6 @@ from .extra import (
 )
 from .gelu import gelu_ev, gelu_poly_ev, gelu_prime_ev
 from .integrate import (
-    bivariate_product_moment,
     gauss_hermite,
     master_theorem,
 )
@@ -34,12 +33,6 @@ class OlsResult(Generic[ArrayType]):
 
     gamma: ArrayType | None = None
     """Coefficients for second-order interactions, if available."""
-
-    fvu: float | None = None
-    """Fraction of variance unexplained, if available.
-
-    Currently only implemented for ReLU activations.
-    """
 
     def __call__(self, x: ArrayType) -> ArrayType:
         """Evaluate the linear model at the given inputs."""
@@ -103,7 +96,6 @@ def ols(
     mean: ArrayType | None = None,
     cov: ArrayType | None = None,
     order: Literal["linear", "quadratic"] = "linear",
-    return_fvu: bool = False,
 ) -> OlsResult[ArrayType]:
     """Ordinary least squares approximation of a single hidden layer MLP.
 
@@ -115,9 +107,6 @@ def ols(
         mean: Mean of the input distribution. If None, the mean is zero.
         cov: Covariance of the input distribution. If None, the covariance is the
             identity matrix.
-        return_fvu: Whether to compute the fraction of variance unexplained.
-            This is only available for ReLU activations, and can be computationally
-            expensive for large networks.
     """
     d_input = W1.shape[1]
     xp = array_api_compat.array_namespace(W1, b1, W2, b2)
@@ -235,44 +224,7 @@ def ols(
     else:
         gamma = None
 
-    # For ReLU, we can compute the covariance matrix of the activations, which is
-    # useful for computing the fraction of variance unexplained in closed form.
-    if act == "relu" and return_fvu:
-        # TODO: Figure out what is wrong with our implementation for non-zero means
-        assert mean is None, "FVU computation is not implemented for non-zero means"
-        rhos = preact_cov / xp.outer(preact_std, preact_std)
-
-        # Compute the raw second moment matrix of the activations
-        act_m2 = bivariate_product_moment(
-            0.0,
-            0.0,
-            rhos,
-            mean_x=preact_mean[:, None],
-            mean_y=preact_mean[None],
-            std_x=preact_std[:, None],
-            std_y=preact_std[None],
-            unconditional=True,
-        )
-
-        # E[MLP(x)^T MLP(x)]
-        mlp_scale = xp.trace(W2 @ act_m2 @ W2.T) + 2 * act_mean.T @ W2.T @ b2 + b2 @ b2
-
-        # E[g(x)^T MLP(x)] where g(x) is the linear predictor
-        x_moment = cross_cov + (xp.outer(mean, output_mean) if mean is not None else 0)
-        inner_prod = xp.trace(beta.T @ x_moment) + alpha.T @ output_mean
-
-        # E[g(x)^T g(x)] where g(x) is the linear predictor
-        cov = cov if cov is not None else xp.eye(d_input)
-        inner = 2 * mean.T @ beta @ alpha if mean is not None else 0
-        lin_scale = xp.trace(beta.T @ cov @ beta) + inner + alpha.T @ alpha
-
-        # Fraction of variance unexplained
-        denom = mlp_scale - output_mean @ output_mean
-        fvu = (mlp_scale - 2 * inner_prod + lin_scale) / denom
-    else:
-        fvu = None
-
-    return OlsResult(alpha, beta, fvu=fvu, gamma=gamma)
+    return OlsResult(alpha, beta, gamma=gamma)
 
 
 def glu_ols(
