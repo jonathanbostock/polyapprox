@@ -147,17 +147,21 @@ def ols(
     if cov is not None and cov.ndim > 2:
         cov = cov.mean(axis=0)  # type: ignore
 
-        # Account for different means
-        if mean is not None and mean.ndim > 1:
-            # Covariance of the means
-            avg_mean = mean.mean(axis=0)  # type: ignore
-            cov += mean.T @ mean / len(mean) - xp.outer(avg_mean, avg_mean)
-
     # Average over mixture components if necessary
     if mean is not None and mean.ndim > 1:
-        mean = mean.mean(axis=0)  # type: ignore
-        output_cross_cov = output_cross_cov.mean(axis=0)
-        output_mean = output_mean.mean(axis=0)
+        avg_mean = mean.mean(axis=0)  # type: ignore
+        avg_output = output_mean.mean(axis=0)
+
+        # Add the covariance of the means to the covariance matrix
+        extra_cov = mean.T @ mean / len(mean) - xp.outer(avg_mean, avg_mean)
+        cov = cov + extra_cov if cov is not None else extra_cov + xp.eye(d_input)
+
+        # Add the cross-covariance of the means to the cross-covariance matrix
+        extra_xcov = mean.T @ output_mean / len(mean) - xp.outer(avg_mean, avg_output)
+        output_cross_cov = output_cross_cov.mean(axis=0) + extra_xcov
+
+        mean = avg_mean
+        output_mean = avg_output
 
     # beta = Cov(x)^-1 Cov(x, f(x))
     if cov is not None:
