@@ -71,7 +71,7 @@ ACT_TO_EVS = {
 # Mapping from activation functions to EVs of their derivatives
 ACT_TO_PRIME_EVS = {
     "gelu": gelu_prime_ev,
-    "identity": lambda mu, sigma: 1.0,
+    "identity": lambda mu, sigma: np.ones_like(mu),
     "relu": relu_prime_ev,
     "sigmoid": partial(gauss_hermite, sigmoid_prime),
     "swish": partial(gauss_hermite, swish_prime),
