@@ -104,26 +104,28 @@ def ols(
         b1: Bias vector of the first layer.
         W2: Weight matrix of the second layer.
         b2: Bias vector of the second layer.
-        mean: Mean of the input distribution. If None, the mean is zero.
-        cov: Covariance of the input distribution. If None, the covariance is the
-            identity matrix.
+        mean: Mean of the input distribution. Can include a batch dimension, denoting
+            a Gaussian mixture with the specified means. If None, the mean is zero.
+        cov: Covariance of the input distribution. Can include a batch dimension,
+            denoting a Gaussian mixture with the specified covariance matrices. If
+            None, the covariance is the identity matrix.
     """
     d_input = W1.shape[1]
     xp = array_api_compat.array_namespace(W1, b1, W2, b2)
 
     # Preactivations are Gaussian; compute their mean and standard deviation
     if cov is not None:
-        preact_cov = W1 @ cov @ W1.T
+        preact_cov = xp.linalg.matrix_transpose(cov @ W1.T) @ W1.T  # Supports batches
         cross_cov = cov @ W1.T
     else:
         preact_cov = W1 @ W1.T
         cross_cov = W1.T
 
     preact_mean = b1
-    preact_var = xp.diag(preact_cov)
+    preact_var = xp.linalg.diagonal(preact_cov)
     preact_std = xp.sqrt(preact_var)
     if mean is not None:
-        preact_mean = preact_mean + W1 @ mean
+        preact_mean = preact_mean + mean @ W1.T
 
     try:
         act_ev = ACT_TO_EVS[act]
@@ -135,11 +137,27 @@ def ols(
     # with the activations. We need the expected derivative of the
     # activation function with respect to the preactivation.
     act_prime_mean = act_prime_ev(preact_mean, preact_std)
-    output_cross_cov = (cross_cov * act_prime_mean) @ W2.T
+    output_cross_cov = (cross_cov * act_prime_mean[..., None, :]) @ W2.T
 
     # Compute expectation of act_fn(x) for each preactivation
     act_mean = act_ev(preact_mean, preact_std)
-    output_mean = W2 @ act_mean + b2
+    output_mean = act_mean @ W2.T + b2
+
+    # Law of total covariance
+    if cov is not None and cov.ndim > 2:
+        cov = cov.mean(axis=0)  # type: ignore
+
+        # Account for different means
+        if mean is not None and mean.ndim > 1:
+            # Covariance of the means
+            avg_mean = mean.mean(axis=0)  # type: ignore
+            cov += mean.T @ mean / len(mean) - xp.outer(avg_mean, avg_mean)
+
+    # Average over mixture components if necessary
+    if mean is not None and mean.ndim > 1:
+        mean = mean.mean(axis=0)  # type: ignore
+        output_cross_cov = output_cross_cov.mean(axis=0)
+        output_mean = output_mean.mean(axis=0)
 
     # beta = Cov(x)^-1 Cov(x, f(x))
     if cov is not None:
@@ -149,7 +167,7 @@ def ols(
 
     alpha = output_mean
     if mean is not None:
-        alpha -= beta.T @ mean
+        alpha -= mean @ beta
 
     if order == "quadratic":
         # Get indices to all unique pairs of input dimensions
