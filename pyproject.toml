@@ -16,6 +16,12 @@ dependencies = [
 ]
 version = "0.1.0"
 
+[project.optional-dependencies]
+dev = [
+    "pre-commit",
+    "statsmodels",
+]
+
 [tool.pyright]
 include = ["polyapprox*"]
 reportPrivateImportUsage = false
