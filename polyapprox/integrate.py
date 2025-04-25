@@ -2,10 +2,9 @@ import math
 from itertools import combinations, product
 from typing import Callable
 
-import array_api_compat
-from scipy.special import roots_hermite
-
+import torch
 from torch import Tensor
+from scipy.special import roots_hermite
 
 def gauss_hermite(
     f: Callable,
@@ -24,16 +23,14 @@ def gauss_hermite(
     Returns:
     - expectations: array-like, E[f(x)] for each (mu, sigma)
     """
-    xp = array_api_compat.array_namespace(mu, sigma)
-
     # Obtain Gauss-Hermite nodes and weights
-    nodes, weights = map(xp.asarray, roots_hermite(num_points))
+    nodes, weights = map(torch.as_tensor, roots_hermite(num_points))
 
     # See example in https://en.wikipedia.org/wiki/Gauss%E2%80%93Hermite_quadrature
     grid = mu[..., None] + sigma[..., None] * math.sqrt(2) * nodes
 
     # Compute the weighted sum
-    prods = xp.einsum("...i,...i->...", f(grid), weights)
+    prods = torch.einsum("...i,...i->...", f(grid), weights)
     return prods / math.sqrt(math.pi)
 
 
@@ -47,11 +44,10 @@ def isserlis(cov: Tensor, indices: list[int]) -> Tensor:
         cov: Covariance matrix or batch of covariance matrices of shape (..., n, n).
         indices: List of indices 0 < i < n for which to compute the expectation.
     """
-    xp = array_api_compat.array_namespace(cov)
-    res = xp.zeros(cov.shape[:-2])
+    res = torch.zeros(cov.shape[:-2])
 
     for partition in pair_partitions(indices):
-        res += xp.prod(xp.stack([cov[..., a, b] for a, b in partition]), axis=0)
+        res += torch.prod(torch.stack([cov[..., a, b] for a, b in partition]), axis=0)
 
     return res
 
@@ -61,8 +57,7 @@ def noncentral_isserlis(
 ) -> Tensor:
     """Compute E[X1 * X2 * ... * Xd] for a noncentral multivariate Gaussian."""
     d = len(indices) or mean.shape[-1]
-    xp = array_api_compat.array_namespace(cov, mean)
-    ev = xp.zeros(cov.shape[:-2])
+    ev = torch.zeros(cov.shape[:-2])
 
     # Iterate over even orders, since the odd orders will be zero
     for k in range(0, d + 1, 2):
@@ -78,7 +73,7 @@ def noncentral_isserlis(
                 remaining = [indices[i] for i in remaining]
                 comb = [indices[i] for i in comb]
 
-            const = xp.prod([mean[..., i] for i in remaining], axis=0)
+            const = torch.prod([mean[..., i] for i in remaining], axis=0)
             ev += const * isserlis(cov, list(comb))
 
     return ev
@@ -92,8 +87,6 @@ def master_theorem(
     xcov: Tensor,
 ) -> list[Tensor]:
     """Reduce multivariate integral E[g(x) * y1 * y2 ...] to k univariate integrals."""
-    xp = array_api_compat.array_namespace(mu_y, cov_y, mu_x, var_x, xcov)
-
     *batch_shape, k = mu_y.shape
     *batch_shape2, k2, k3 = cov_y.shape
 
@@ -118,11 +111,11 @@ def master_theorem(
     # Iterate over polynomial terms
     for m in range(k + 1):
         # Running sum of terms in the coefficient
-        coef = xp.zeros(batch_shape)
+        coef = torch.zeros(batch_shape)
 
         # Enumerate every combination of m unique a terms
         for comb in combinations(range(k), m):
-            prefix = xp.ones(batch_shape)
+            prefix = torch.ones(batch_shape)
 
             # Multiply together the a terms
             for i in comb:
