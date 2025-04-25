@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from functools import partial
-from typing import Literal
+from typing import Literal, Optional
 
 import array_api_compat
 import numpy as np
@@ -97,6 +97,7 @@ def ols(
     mean: Tensor | None = None,
     cov: Tensor | None = None,
     order: Literal["linear", "quadratic"] = "linear",
+    quadratic_term_samples: Optional[Tensor] = None
 ) -> OlsResult:
     """Ordinary least squares approximation of a single hidden layer MLP.
 
@@ -112,6 +113,10 @@ def ols(
             None, the covariance is the identity matrix.
     """
     d_input = W1.shape[1]
+
+    num_quadratic_terms = (d_input * (d_input + 1)) // 2
+    if quadratic_term_samples is not None:
+        assert quadratic_term_samples.shape[0] <= num_quadratic_terms
 
     # Preactivations are Gaussian; compute their mean and standard deviation
     if cov is not None:
@@ -191,14 +196,28 @@ def ols(
                 torch.stack([sigma[rows, rows], sigma[rows, cols]]),
                 torch.stack([sigma[cols, rows], sigma[cols, cols]]),
             ]
-        ).T
+        ).transpose(0,-1)
         expanded_xcov = torch.stack(
             [
                 cross_cov[rows],
                 cross_cov[cols],
             ]
-        ).T
-        expanded_mean = torch.stack([mu[rows], mu[cols]]).T
+        ).transpose(0,-1)
+        expanded_mean = torch.stack([mu[rows], mu[cols]]).transpose(0,-1)
+
+        # x_squared_terms = (d_input * (d_input + 1)) // 2
+        # expanded_cov has shape (x_squared_terms, 2, 2)
+        # expanded_xcov has shape (d_hidden, x_squared_terms, 2)
+        # expanded_mean has shape (x_squared_terms, 2)
+
+        # If we are sampling a subset of the quadratic terms, we need to
+        # select the corresponding rows and columns from the covariance and
+        # cross-covariance matrices, and the corresponding entries from the
+        # mean vector.
+        if quadratic_term_samples is not None:
+            expanded_cov = expanded_cov[quadratic_term_samples, :, :]
+            expanded_xcov = expanded_xcov[:, quadratic_term_samples, :]
+            expanded_mean = expanded_mean[quadratic_term_samples, :]
 
         coefs = master_theorem(
             # Add an extra singleton dimension so that we can broadcast across all the
@@ -234,15 +253,22 @@ def ols(
         # Where rows != cols, E[x * y] = E[x] * E[y] = 0
         feature_mean = (rows == cols).to(W2.dtype)
 
+        if quadratic_term_samples is not None:
+            feature_mean = feature_mean[quadratic_term_samples]
+
         # Where rows == cols, Var[x * y] = Var[x^2] = E[x^4] - E[x^2]^2 = 3 - 1 = 2
         # Where rows != cols, Var[x * y] = E[x^2 * y^2] - E[x * y]^2 = 1 - 0 = 1
         feature_var = 1 + (rows == cols)
 
+        if quadratic_term_samples is not None:
+            feature_var = feature_var[quadratic_term_samples]
+
         quad_xcov = W2 @ (E_gy_x1x2 - torch.einsum("...i,...j->...ij", const, feature_mean))
+
         gamma = quad_xcov / feature_var
 
         # adjust constant term
-        alpha -= feature_mean @ gamma.T
+        alpha -= feature_mean.squeeze() @ gamma.mT
     else:
         gamma = None
 
