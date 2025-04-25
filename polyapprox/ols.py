@@ -169,7 +169,7 @@ def ols(
         cov = cov + extra_cov if cov is not None else extra_cov + torch.eye(d_input)
 
         # Add the cross-covariance of the means to the cross-covariance matrix
-        extra_xcov = mean.T @ output_mean / len(mean) - xp.outer(avg_mean, avg_output)
+        extra_xcov = mean.T @ output_mean / len(mean) - torch.einsum("...i,...j->...ij", avg_mean, avg_output)
         output_cross_cov = output_cross_cov.mean(axis=0) + extra_xcov
 
         mean = avg_mean
@@ -370,7 +370,7 @@ def glu_ols(
     feature_xcov = (
         coefs[0] * quad[:, None] + coefs[1] * lin[:, None] + coefs[2] * const[:, None]
     )
-    beta = (feature_xcov - xp.outer(out_mean, mean)).T
+    beta = (feature_xcov - torch.einsum("...i,...j->...ij", out_mean, mean)).T
     alpha = out_mean - mean @ beta
 
     return OlsResult(alpha, beta)

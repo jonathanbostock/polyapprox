@@ -1,6 +1,6 @@
 import torch
 
-from polyapprox.crosscoder import MLPData, CrossCoderTrainer, CrossCoderTrainerTrainingArgs
+from polyapprox.crosscoders import MLPData, CrossCoderTrainer, CrossCoderTrainerTrainingArgs
 from polyapprox.ols import ols
 
 def main():
@@ -19,7 +19,8 @@ def main():
         num_features=1024,
         target_l0=8,
         num_steps=1_000,
-        learning_rate=1e-2
+        learning_rate=1e-2,
+        non_linearity="gelu"
     )
 
     trainer = CrossCoderTrainer(mlp, "adamw", args)

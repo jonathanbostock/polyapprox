@@ -84,6 +84,7 @@ class CrossCoderTrainerTrainingArgs:
     num_steps: int
     learning_rate: float
     num_gamma_rows: Optional[int] = None
+    non_linearity: Literal["gelu", "relu"] = "gelu"
 
 class CrossCoderTrainer:
     def __init__(
@@ -122,7 +123,7 @@ class CrossCoderTrainer:
 
 
             with torch.no_grad():
-                mlp_data = ols(**self.mlp.params, act="gelu", order="quadratic", quadratic_term_samples=None)
+                mlp_data = ols(**self.mlp.params, act=self.args.non_linearity, order="quadratic", quadratic_term_samples=None)
 
             crosscoder_data = ols(**self.crosscoder.params, act="jump_relu", order="quadratic", quadratic_term_samples=None)
 
