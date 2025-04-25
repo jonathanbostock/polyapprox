@@ -22,7 +22,7 @@ from .integrate import (
     master_theorem,
 )
 from .relu import relu_ev, relu_poly_ev, relu_prime_ev
-
+from .jump_relu import jump_relu_ev, jump_relu_poly_ev, jump_relu_prime_ev
 
 @dataclass(frozen=True)
 class OlsResult:
@@ -45,6 +45,14 @@ class OlsResult:
             y += xp.einsum("bj,bhj->bh", x, a)
 
         return y
+    
+    def coefficients(self) -> Tensor:
+        """Return all the coefficients"""
+
+        if self.gamma is None:
+            return torch.cat([self.alpha.flatten(), self.beta.flatten()], dim=-1)
+        else:
+            return torch.cat([self.alpha.flatten(), self.beta.flatten(), self.gamma.flatten()], dim=-1)
 
     def unpack_gamma(self) -> Tensor:
         """Unpack gamma into a full stack of matrices."""
@@ -65,6 +73,7 @@ ACT_TO_EVS = {
     "gelu": gelu_ev,
     "identity": lambda mu, sigma: mu,
     "relu": relu_ev,
+    "jump_relu": jump_relu_ev,
     "sigmoid": partial(gauss_hermite, sigmoid),
     "swish": partial(gauss_hermite, swish),
     "tanh": partial(gauss_hermite, np.tanh),
@@ -74,6 +83,7 @@ ACT_TO_PRIME_EVS = {
     "gelu": gelu_prime_ev,
     "identity": lambda mu, sigma: np.ones_like(mu),
     "relu": relu_prime_ev,
+    "jump_relu": jump_relu_prime_ev,
     "sigmoid": partial(gauss_hermite, sigmoid_prime),
     "swish": partial(gauss_hermite, swish_prime),
     "tanh": partial(gauss_hermite, lambda x: 1 - np.tanh(x) ** 2),
@@ -82,6 +92,7 @@ ACT_TO_POLY_EVS = {
     "gelu": gelu_poly_ev,
     "identity": id_poly_ev,
     "relu": relu_poly_ev,
+    "jump_relu": jump_relu_poly_ev,
     "sigmoid": sigmoid_poly_ev,
     "swish": swish_poly_ev,
 }
@@ -113,10 +124,6 @@ def ols(
             None, the covariance is the identity matrix.
     """
     d_input = W1.shape[1]
-
-    num_quadratic_terms = (d_input * (d_input + 1)) // 2
-    if quadratic_term_samples is not None:
-        assert quadratic_term_samples.shape[0] <= num_quadratic_terms
 
     # Preactivations are Gaussian; compute their mean and standard deviation
     if cov is not None:
