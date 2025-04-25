@@ -3,7 +3,7 @@ import math
 import array_api_compat
 from scipy.special import factorial2
 
-from .backends import ArrayType, norm_cdf, norm_pdf
+from .backends import norm_cdf, norm_pdf
 
 # All of these functions assume theta = 1.0, which we can switch everything to be like
 

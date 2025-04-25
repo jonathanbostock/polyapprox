@@ -4,26 +4,27 @@ import array_api_compat
 from scipy.special import gamma
 from scipy.stats import nct
 
-from .backends import ArrayType, norm_cdf, norm_pdf
+from .backends import norm_cdf, norm_pdf
+from torch import Tensor
 
 
-def gelu(x: ArrayType) -> ArrayType:
+def gelu(x: Tensor) -> Tensor:
     """Gaussian Error Linear Unit (GELU) activation function"""
     return x * norm_cdf(x)
 
 
-def gelu_prime(x: ArrayType) -> ArrayType:
+def gelu_prime(x: Tensor) -> Tensor:
     """Derivative of GELU(x)"""
     return norm_cdf(x) + x * norm_pdf(x)
 
 
-def gelu_ev(mu: ArrayType, sigma: ArrayType) -> ArrayType:
+def gelu_ev(mu: Tensor, sigma: Tensor) -> Tensor:
     """Expected value of GELU(x) under N(mu, sigma)"""
     denom = (1 + sigma**2) ** 0.5
     return mu * norm_cdf(mu / denom) + (sigma**2 / denom) * norm_pdf(mu / denom)
 
 
-def gelu_prime_ev(mu: ArrayType, sigma: ArrayType) -> ArrayType:
+def gelu_prime_ev(mu: Tensor, sigma: Tensor) -> Tensor:
     """Expected value of GELU'(x) under N(mu, sigma)"""
     denom = (1 + sigma**2) ** 0.5
 
@@ -31,7 +32,7 @@ def gelu_prime_ev(mu: ArrayType, sigma: ArrayType) -> ArrayType:
     return norm_cdf(mu / denom) + norm_pdf(mu / denom) * inner
 
 
-def gelu_poly_ev(n: int, mu: ArrayType, sigma: ArrayType) -> ArrayType:
+def gelu_poly_ev(n: int, mu: Tensor, sigma: Tensor) -> Tensor:
     """Compute E[x^n * GELU(x)] analytically where x ~ N(mu, sigma^2)"""
     xp = array_api_compat.array_namespace(mu, sigma)
     ev = xp.zeros_like(mu)

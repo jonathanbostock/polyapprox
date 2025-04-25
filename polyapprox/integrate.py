@@ -5,15 +5,14 @@ from typing import Callable
 import array_api_compat
 from scipy.special import roots_hermite
 
-from .backends import ArrayType
-
+from torch import Tensor
 
 def gauss_hermite(
     f: Callable,
-    mu: ArrayType,
-    sigma: ArrayType,
+    mu: Tensor,
+    sigma: Tensor,
     num_points: int = 50,
-) -> ArrayType:
+) -> Tensor:
     """
     Compute E[f(x)] where x ~ N(mu, sigma^2) using Gauss-Hermite quadrature.
 
@@ -38,7 +37,7 @@ def gauss_hermite(
     return prods / math.sqrt(math.pi)
 
 
-def isserlis(cov: ArrayType, indices: list[int]) -> ArrayType:
+def isserlis(cov: Tensor, indices: list[int]) -> Tensor:
     """Compute `E[prod_{i=1}^n X_i]` for jointly Gaussian X_i with covariance `cov`.
 
     This is an implementation of Isserlis' theorem, also known as Wick's formula. It is
@@ -58,8 +57,8 @@ def isserlis(cov: ArrayType, indices: list[int]) -> ArrayType:
 
 
 def noncentral_isserlis(
-    cov: ArrayType, mean: ArrayType, indices: list[int] = []
-) -> ArrayType:
+    cov: Tensor, mean: Tensor, indices: list[int] = []
+) -> Tensor:
     """Compute E[X1 * X2 * ... * Xd] for a noncentral multivariate Gaussian."""
     d = len(indices) or mean.shape[-1]
     xp = array_api_compat.array_namespace(cov, mean)
@@ -86,12 +85,12 @@ def noncentral_isserlis(
 
 
 def master_theorem(
-    mu_x: ArrayType,
-    var_x: ArrayType,
-    mu_y: ArrayType,
-    cov_y: ArrayType,
-    xcov: ArrayType,
-) -> list[ArrayType]:
+    mu_x: Tensor,
+    var_x: Tensor,
+    mu_y: Tensor,
+    cov_y: Tensor,
+    xcov: Tensor,
+) -> list[Tensor]:
     """Reduce multivariate integral E[g(x) * y1 * y2 ...] to k univariate integrals."""
     xp = array_api_compat.array_namespace(mu_y, cov_y, mu_x, var_x, xcov)
 

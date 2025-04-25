@@ -1,11 +1,10 @@
 import array_api_compat
 from scipy.special import expit as sigmoid
 
-from .backends import ArrayType
 from .integrate import gauss_hermite
+from torch import Tensor
 
-
-def id_poly_ev(n: int, mu: ArrayType, sigma: ArrayType) -> ArrayType:
+def id_poly_ev(n: int, mu: Tensor, sigma: Tensor) -> Tensor:
     """
     Compute E[x^n * x] analytically where x ~ N(mu, sigma^2)
 
@@ -17,7 +16,7 @@ def id_poly_ev(n: int, mu: ArrayType, sigma: ArrayType) -> ArrayType:
     return normal_moment(n + 1, mu, sigma)
 
 
-def normal_moment(n: int, mu: ArrayType, sigma: ArrayType) -> ArrayType:
+def normal_moment(n: int, mu: Tensor, sigma: Tensor) -> Tensor:
     """Compute E[x^n] analytically where x ~ N(mu, sigma^2)."""
     xp = array_api_compat.array_namespace(mu, sigma)
 
@@ -48,8 +47,8 @@ def swish_prime(x):
     return sigmoid(x) + swish(x) - sigmoid(x) * swish(x)
 
 
-def sigmoid_poly_ev(n: int, mu: ArrayType, sigma: ArrayType) -> ArrayType:
-    """
+def sigmoid_poly_ev(n: int, mu: Tensor, sigma: Tensor) -> Tensor:
+    ""
     Compute E[x^n * ReLU(x)] analytically where x ~ N(mu, sigma^2)
 
     Parameters:
