@@ -3,30 +3,30 @@ import math
 import array_api_compat
 from scipy.special import factorial2
 
-from .backends import ArrayType, norm_cdf, norm_pdf
+from .backends import norm_cdf, norm_pdf
+from torch import Tensor
 
 
-def relu_ev(mu: ArrayType, sigma: ArrayType) -> ArrayType:
+def relu_ev(mu: Tensor, sigma: Tensor) -> Tensor:
     """Expected value of RELU(x) under N(mu, sigma)"""
     return mu * norm_cdf(mu / sigma) + sigma * norm_pdf(mu / sigma)
 
 
-def relu_prime_ev(mu: ArrayType, sigma: ArrayType) -> ArrayType:
+def relu_prime_ev(mu: Tensor, sigma: Tensor) -> Tensor:
     """Expected value of RELU'(x) under N(mu, sigma)"""
     return norm_cdf(mu / sigma)
 
 
-def relu_poly_ev(n: int, mu: ArrayType, sigma: ArrayType) -> ArrayType:
-    """
-    Compute E[x^n * ReLU(x)] analytically where x ~ N(mu, sigma^2)
+def relu_poly_ev(n: int, mu: Tensor, sigma: Tensor) -> Tensor:
+    """Compute E[x^n * ReLU(x)] analytically where x ~ N(mu, sigma^2)
 
     Parameters:
     n     : int, the exponent n in x^n * ReLU(x)
-    mu    : ArrayLike, the mean(s) of the normal distribution(s)
-    sigma : ArrayLike, the standard deviation(s) of the normal distribution(s)
+    mu    : Tensor, the mean(s) of the normal distribution(s)
+    sigma : Tensor, the standard deviation(s) of the normal distribution(s)
 
     Returns:
-    result : NDArray, the computed expected value(s)
+    result : Tensor, the computed expected value(s)
     """
     xp = array_api_compat.array_namespace(mu, sigma)
 
