@@ -1,11 +1,12 @@
 from dataclasses import dataclass
 from functools import partial
-from typing import Generic, Literal
+from typing import Literal
 
 import array_api_compat
 import numpy as np
+import torch
 
-from .backends import ArrayType
+from torch import Tensor
 from .extra import (
     id_poly_ev,
     sigmoid,
@@ -24,17 +25,17 @@ from .relu import relu_ev, relu_poly_ev, relu_prime_ev
 
 
 @dataclass(frozen=True)
-class OlsResult(Generic[ArrayType]):
-    alpha: ArrayType
+class OlsResult:
+    alpha: Tensor
     """Intercept of the linear model."""
 
-    beta: ArrayType
+    beta: Tensor
     """Coefficients of the linear model."""
 
-    gamma: ArrayType | None = None
+    gamma: Tensor | None = None
     """Coefficients for second-order interactions, if available."""
 
-    def __call__(self, x: ArrayType) -> ArrayType:
+    def __call__(self, x: Tensor) -> Tensor:
         """Evaluate the linear model at the given inputs."""
         xp = array_api_compat.get_namespace(x)
         y = x @ self.beta + self.alpha
@@ -45,7 +46,7 @@ class OlsResult(Generic[ArrayType]):
 
         return y
 
-    def unpack_gamma(self) -> ArrayType:
+    def unpack_gamma(self) -> Tensor:
         """Unpack gamma into a full stack of matrices."""
         if self.gamma is None:
             raise ValueError("No second-order interactions available")
@@ -87,16 +88,16 @@ ACT_TO_POLY_EVS = {
 
 
 def ols(
-    W1: ArrayType,
-    b1: ArrayType,
-    W2: ArrayType,
-    b2: ArrayType,
+    W1: Tensor,
+    b1: Tensor,
+    W2: Tensor,
+    b2: Tensor,
     *,
     act: str = "gelu",
-    mean: ArrayType | None = None,
-    cov: ArrayType | None = None,
+    mean: Tensor | None = None,
+    cov: Tensor | None = None,
     order: Literal["linear", "quadratic"] = "linear",
-) -> OlsResult[ArrayType]:
+) -> OlsResult:
     """Ordinary least squares approximation of a single hidden layer MLP.
 
     Args:
@@ -111,19 +112,18 @@ def ols(
             None, the covariance is the identity matrix.
     """
     d_input = W1.shape[1]
-    xp = array_api_compat.array_namespace(W1, b1, W2, b2)
 
     # Preactivations are Gaussian; compute their mean and standard deviation
     if cov is not None:
-        preact_cov = xp.linalg.matrix_transpose(cov @ W1.T) @ W1.T  # Supports batches
+        preact_cov = (cov @ W1.T).transpose(-1, -2) @ W1  # Supports batches
         cross_cov = cov @ W1.T
     else:
         preact_cov = W1 @ W1.T
         cross_cov = W1.T
 
     preact_mean = b1
-    preact_var = xp.linalg.diagonal(preact_cov)
-    preact_std = xp.sqrt(preact_var)
+    preact_var = preact_cov.diagonal(dim1=-2, dim2=-1)
+    preact_std = preact_var.sqrt()
     if mean is not None:
         preact_mean = preact_mean + mean @ W1.T
 
@@ -153,8 +153,8 @@ def ols(
         avg_output = output_mean.mean(axis=0)
 
         # Add the covariance of the means to the covariance matrix
-        extra_cov = mean.T @ mean / len(mean) - xp.outer(avg_mean, avg_mean)
-        cov = cov + extra_cov if cov is not None else extra_cov + xp.eye(d_input)
+        extra_cov = mean.T @ mean / len(mean) - torch.einsum("...i,...j->...ij", avg_mean, avg_mean)
+        cov = cov + extra_cov if cov is not None else extra_cov + torch.eye(d_input)
 
         # Add the cross-covariance of the means to the cross-covariance matrix
         extra_xcov = mean.T @ output_mean / len(mean) - xp.outer(avg_mean, avg_output)
@@ -165,7 +165,7 @@ def ols(
 
     # beta = Cov(x)^-1 Cov(x, f(x))
     if cov is not None:
-        beta = xp.linalg.solve(cov, output_cross_cov)
+        beta = torch.linalg.solve(cov, output_cross_cov)
     else:
         beta = output_cross_cov
 
@@ -175,30 +175,30 @@ def ols(
 
     if order == "quadratic":
         # Get indices to all unique pairs of input dimensions
-        rows, cols = map(xp.asarray, np.tril_indices(d_input))
+        rows, cols = map(lambda x: torch.from_numpy(x).to(torch.int32), np.tril_indices(d_input))
 
         # TODO: Support non-zero means and non-diagonal covariances
         assert cov is None and mean is None
-        sigma = xp.eye(d_input)
-        mu = xp.zeros(d_input)
+        sigma = torch.eye(d_input)
+        mu = torch.zeros(d_input)
 
         # "Expand" our covariance and cross-covariance matrices into a batch of 2x2
         # and 2x1 matrices, respectively, to apply the master theorem. Each matrix
         # corresponds to a pairing of two input dimensions. We do a similar thing
         # for the means, which are 1D vectors.
-        expanded_cov = xp.stack(
+        expanded_cov = torch.stack(
             [
-                xp.stack([sigma[rows, rows], sigma[rows, cols]]),
-                xp.stack([sigma[cols, rows], sigma[cols, cols]]),
+                torch.stack([sigma[rows, rows], sigma[rows, cols]]),
+                torch.stack([sigma[cols, rows], sigma[cols, cols]]),
             ]
         ).T
-        expanded_xcov = xp.stack(
+        expanded_xcov = torch.stack(
             [
                 cross_cov[rows],
                 cross_cov[cols],
             ]
         ).T
-        expanded_mean = xp.stack([mu[rows], mu[cols]]).T
+        expanded_mean = torch.stack([mu[rows], mu[cols]]).T
 
         coefs = master_theorem(
             # Add an extra singleton dimension so that we can broadcast across all the
@@ -232,13 +232,13 @@ def ols(
 
         # Where rows == cols, E[x * y] = E[x^2] = 1
         # Where rows != cols, E[x * y] = E[x] * E[y] = 0
-        feature_mean = xp.astype(rows == cols, W2.dtype)
+        feature_mean = (rows == cols).to(W2.dtype)
 
         # Where rows == cols, Var[x * y] = Var[x^2] = E[x^4] - E[x^2]^2 = 3 - 1 = 2
         # Where rows != cols, Var[x * y] = E[x^2 * y^2] - E[x * y]^2 = 1 - 0 = 1
         feature_var = 1 + (rows == cols)
 
-        quad_xcov = W2 @ (E_gy_x1x2 - xp.outer(const, feature_mean))
+        quad_xcov = W2 @ (E_gy_x1x2 - torch.einsum("...i,...j->...ij", const, feature_mean))
         gamma = quad_xcov / feature_var
 
         # adjust constant term
@@ -250,26 +250,25 @@ def ols(
 
 
 def glu_ols(
-    W: ArrayType,
-    V: ArrayType,
-    b1: ArrayType,
-    b2: ArrayType,
-    W2: ArrayType | None = None,
+    W: Tensor,
+    V: Tensor,
+    b1: Tensor,
+    b2: Tensor,
+    W2: Tensor | None = None,
     *,
     act: str = "sigmoid",
-    mean: ArrayType | None = None,
-    cov: ArrayType | None = None,
+    mean: Tensor | None = None,
+    cov: Tensor | None = None,
 ):
     """Analytically compute the mean output of a gated linear unit (GLU).
 
     See "GLU Variants Improve Transformer" <https://arxiv.org/abs/2002.05202>
     by Shazeer (2020) for more details.
     """
-    xp = array_api_compat.array_namespace(W, V, b1, b2)
     if cov is None:
-        cov = xp.eye(len(b1))
+        cov = torch.eye(len(b1))
     if mean is None:
-        mean = xp.zeros(len(b1))
+        mean = torch.zeros(len(b1))
 
     assert cov is not None and mean is not None
 
@@ -277,13 +276,13 @@ def glu_ols(
     # Let y = W @ x + b1 and z = V @ x + b2
     cov_xz = cov @ V.T
     cov_yx = W @ cov
-    cov_yz = xp.diag(W @ cov @ V.T)  # We only need the diagonal
+    cov_yz = torch.diag(W @ cov @ V.T)  # We only need the diagonal
     cov_zz = V @ cov @ V.T
 
-    y_std = xp.diag(W @ cov @ W.T) ** 0.5
+    y_std = torch.diag(W @ cov @ W.T) ** 0.5
 
-    y_mean = xp.asarray(b1) + W @ mean
-    z_mean = xp.asarray(b2) + V @ mean
+    y_mean = b1 + W @ mean
+    z_mean = b2 + V @ mean
 
     try:
         act_ev = ACT_TO_EVS[act]
@@ -307,23 +306,23 @@ def glu_ols(
     lin = poly_ev(1, y_mean, y_std)
     const = poly_ev(0, y_mean, y_std)
 
-    var_x = np.broadcast_to(xp.diag(cov)[..., None], cov_xz.shape)
-    var_z = np.broadcast_to(xp.diag(cov_zz)[None], cov_xz.shape)
-    cov_rest = xp.asarray(
+    var_x = np.broadcast_to(torch.diag(cov)[..., None], cov_xz.shape)
+    var_z = np.broadcast_to(torch.diag(cov_zz)[None], cov_xz.shape)
+    cov_rest = torch.asarray(
         [
-            xp.stack([var_z, cov_xz]),
-            xp.stack([cov_xz, var_x]),
+            torch.stack([var_z, cov_xz]),
+            torch.stack([cov_xz, var_x]),
         ]
     ).T
-    mu_rest = xp.asarray(
+    mu_rest = torch.asarray(
         [
-            np.broadcast_to(z_mean[None], cov_xz.shape),
-            np.broadcast_to(mean[..., None], cov_xz.shape),
+            torch.broadcast_to(z_mean[None], cov_xz.shape),
+            torch.broadcast_to(mean[..., None], cov_xz.shape),
         ]
     ).T
-    xcov = xp.stack(
+    xcov = torch.stack(
         [
-            np.broadcast_to(cov_yz[..., None], cov_yx.shape),
+            torch.broadcast_to(cov_yz[..., None], cov_yx.shape),
             cov_yx,
         ],
         axis=-1,

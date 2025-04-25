@@ -96,7 +96,7 @@ def master_theorem(
     # TODO: Make this work for constant X by choosing a "pivot" variable
     # from among the Y_i with the largest variance, then computing all the
     # conditional expectations with respect to that variable.
-    assert xp.all(var_x > 0.0), "X must have positive variance"
+    assert torch.all(var_x > 0.0), "X must have positive variance"
 
     # Coefficients and intercepts for each conditional expectation
     a = xcov / var_x[..., None]
