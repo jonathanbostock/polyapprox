@@ -14,7 +14,7 @@ def jump_relu_ev(mu: ArrayType, sigma: ArrayType) -> ArrayType:
 
 def jump_relu_prime_ev(mu: ArrayType, sigma: ArrayType) -> ArrayType:
     """Expected value of JumpReLU'(x) under N(mu, sigma)"""
-    return norm_cdf((1-mu) / sigma)
+    return norm_pdf((1-mu) / sigma)
 
 
 def jump_relu_poly_ev(n: int, mu: ArrayType, sigma: ArrayType) -> ArrayType:
