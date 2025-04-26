@@ -11,6 +11,10 @@ from polyapprox.ols import ols
 def relu(x):
     return np.maximum(0, x)
 
+def jump_relu(x):
+    # Define here so we can just use the simpler numpy option in tests
+    # and not worry about backend_compat_api
+    return np.where(x > 1.0, x, 0)
 
 def test_ols_relu():
     d = 10
@@ -48,14 +52,22 @@ def test_ols_relu():
     np.testing.assert_allclose(quad_res.gamma, 0)
 
 
-@pytest.mark.parametrize("act", ["gelu", "relu"])
+@pytest.mark.parametrize("act", ["gelu", "relu", "jump_relu"])
 @pytest.mark.parametrize("k", [1, 2, 3])
 def test_ols_monte_carlo(act: str, k: int):
     # Determinism
     np.random.seed(0)
 
     # Choose activation function
-    act_fn = gelu if act == "gelu" else relu
+    match act:
+        case "gelu":
+            act_fn = gelu
+        case "relu":
+            act_fn = relu
+        case "jump_relu":
+            act_fn = jump_relu
+        case _:
+            raise ValueError(f"Unknown activation function: {act}")
 
     # Implement the MLP
     def mlp(x, W1, b1, W2, b2):
