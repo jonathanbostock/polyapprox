@@ -9,6 +9,10 @@ from scipy.stats import norm
 
 from polyapprox.jump_relu import jump_relu_ev, jump_relu_poly_ev, jump_relu_prime_ev
 
+# NB: This is mostly a copy of test_relu.py, with the ReLU replaced with JumpReLU
+# The main difference is that we have added 1e-14 to the error tolerance, because
+# the sharpness of JumpReLU makes quad have a hard time estimating the error.
+# Frankly. 1e-14 error is good enough for anyone.
 
 def jump_relu(x):
     """JumpReLU(x) activation function, with theta = 1.0"""
@@ -31,8 +35,8 @@ def test_jump_relu_evs(mu, sigma):
     numerical_ev, err = quad(
         lambda x: jump_relu(x) * norm.pdf(x, loc=mu, scale=sigma), -np.inf, np.inf
     )
-    np.testing.assert_allclose(numerical_ev, analytic_ev, atol=err)
-    torch_test(jump_relu_ev, numerical_ev, mu, sigma, atol=err)
+    np.testing.assert_allclose(numerical_ev, analytic_ev, atol=1e-15 + err)
+    torch_test(jump_relu_ev, numerical_ev, mu, sigma, atol=1e-15 + err)
 
 
 @given(st.floats(-4, 4), st.floats(0.1, 10))
@@ -43,8 +47,8 @@ def test_relu_prime_evs(mu, sigma):
         -np.inf,
         np.inf,
     )
-    np.testing.assert_allclose(numerical_ev, analytic_ev, atol=err)
-    torch_test(jump_relu_prime_ev, numerical_ev, mu, sigma, atol=err)
+    np.testing.assert_allclose(numerical_ev, analytic_ev, atol=1e-15 + err)
+    torch_test(jump_relu_prime_ev, numerical_ev, mu, sigma, atol=1e-15 + err)
 
 
 @given(st.integers(0, 5), st.floats(-4, 4), st.floats(0.1, 10))
@@ -55,7 +59,5 @@ def test_jump_relu_poly_evs(n, mu, sigma):
         -np.inf,
         np.inf,
     )
-    # Don't use relative tolerance because the expected value can be very small.
-    # The sharpness of ReLU also makes quad have a hard time estimating the error.
-    assert abs(numerical_ev - analytic_ev) < 1e-15 + err
-    torch_test(partial(jump_relu_poly_ev, n), numerical_ev, mu, sigma, atol=1e-15 + err)
+    assert abs(numerical_ev - analytic_ev) < 1e-14 + err
+    torch_test(partial(jump_relu_poly_ev, n), numerical_ev, mu, sigma, atol=1e-14 + err)
