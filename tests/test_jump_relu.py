@@ -10,9 +10,10 @@ from scipy.stats import norm
 from polyapprox.jump_relu import jump_relu_ev, jump_relu_poly_ev, jump_relu_prime_ev
 
 # NB: This is mostly a copy of test_relu.py, with the ReLU replaced with JumpReLU
-# The main difference is that we have added 1e-14 to the error tolerance, because
-# the sharpness of JumpReLU makes quad have a hard time estimating the error.
-# Frankly. 1e-14 error is good enough for anyone.
+# The main difference is that we have added 1e-10 to the error tolerance in the
+# jump_relu_poly_ev test, and 1e-15 elsewhere because the sharpness of JumpReLU 
+# makes quad have a hard time estimating the error.
+# Frankly. 1e-10 error is good enough for anyone.
 
 # Disable the dirac delta term in the expected value of the derivative
 jump_relu_prime_ev = partial(jump_relu_prime_ev, include_dirac_delta_term=False)
@@ -62,5 +63,5 @@ def test_jump_relu_poly_evs(n, mu, sigma):
         -np.inf,
         np.inf,
     )
-    assert abs(numerical_ev - analytic_ev) < 1e-9 + err
-    torch_test(partial(jump_relu_poly_ev, n), numerical_ev, mu, sigma, atol=1e-9 + err)
+    assert abs(numerical_ev - analytic_ev) < 1e-10 + err
+    torch_test(partial(jump_relu_poly_ev, n), numerical_ev, mu, sigma, atol=1e-10 + err)
