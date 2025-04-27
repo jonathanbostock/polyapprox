@@ -14,6 +14,9 @@ from polyapprox.jump_relu import jump_relu_ev, jump_relu_poly_ev, jump_relu_prim
 # the sharpness of JumpReLU makes quad have a hard time estimating the error.
 # Frankly. 1e-14 error is good enough for anyone.
 
+# Disable the dirac delta term in the expected value of the derivative
+jump_relu_prime_ev = partial(jump_relu_prime_ev, include_dirac_delta_term=False)
+
 def jump_relu(x):
     """JumpReLU(x) activation function, with theta = 1.0"""
     return np.where(x > 1.0, x, 0)
