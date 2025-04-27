@@ -3,7 +3,8 @@ import math
 import array_api_compat
 from scipy.special import factorial2
 
-from .backends import ArrayType, norm_cdf, norm_pdf
+from .backends import norm_cdf, norm_pdf
+from torch import Tensor
 
 raise ImportWarning(
     """
@@ -16,7 +17,7 @@ raise ImportWarning(
 # All of these functions assume theta = 1.0, which loses no generality because
 # we can always rescale our weights and biases to get an equivalent network.
 
-def jump_relu_ev(mu: ArrayType, sigma: ArrayType) -> ArrayType:
+def jump_relu_ev(mu: Tensor, sigma: Tensor) -> Tensor:
     """Expected value of JumpReLU(x) under N(mu, sigma)"""
     return mu * (1-norm_cdf((1-mu) / sigma)) + sigma * norm_pdf((1-mu) / sigma)
 
@@ -34,7 +35,7 @@ def jump_relu_prime_ev(mu: ArrayType, sigma: ArrayType, include_dirac_delta_term
         return normal_term
 
 
-def jump_relu_poly_ev(n: int, mu: ArrayType, sigma: ArrayType) -> ArrayType:
+def jump_relu_poly_ev(n: int, mu: Tensor, sigma: Tensor) -> Tensor:
     """
     Compute E[x^n * JumpReLU(x)] analytically where x ~ N(mu, sigma^2)
 
