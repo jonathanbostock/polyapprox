@@ -130,7 +130,7 @@ def ols(
 
     # Preactivations are Gaussian; compute their mean and standard deviation
     if cov is not None:
-        preact_cov = (cov @ W1.T).transpose(-1, -2) @ W1  # Supports batches
+        preact_cov = (cov @ W1.T).transpose(-2,-1) @ W1.T  # Supports batches
         cross_cov = cov @ W1.T
     else:
         preact_cov = W1 @ W1.T

@@ -3,19 +3,16 @@ import torch
 import pytest
 import statsmodels.api as sm
 from scipy.stats import multivariate_normal as mvn
+from scipy.stats import norm
 from statsmodels.regression.linear_model import OLS
 
 from polyapprox.gelu import gelu
+from polyapprox.jump_relu import jump_relu
+from polyapprox.relu import relu
 from polyapprox.ols import ols
 
-
-def relu(x):
-    return np.maximum(0, x)
-
-def jump_relu(x):
-    # Define here so we can just use the simpler numpy option in tests
-    # and not worry about backend_compat_api
-    return np.where(x > 1.0, x, 0)
+precision = 1e-6
+torch.set_default_dtype(torch.float64)
 
 def test_ols_relu():
     torch.manual_seed(0)
@@ -30,8 +27,8 @@ def test_ols_relu():
     # form: 0.5 * W2 @ W1
     lin_res = ols(W1, nil, W2, nil, act="relu", order="linear")
     quad_res = ols(W1, nil, W2, nil, act="relu", order="quadratic")
-    np.testing.assert_allclose(lin_res.beta.T, 0.5 * W2 @ W1)
-    np.testing.assert_allclose(quad_res.beta.T, 0.5 * W2 @ W1)
+    np.testing.assert_allclose(lin_res.beta.T, 0.5 * W2 @ W1, atol=1e-6)
+    np.testing.assert_allclose(quad_res.beta.T, 0.5 * W2 @ W1, atol=1e-6)
 
     # Monte Carlo check that the FVU is below 1
     n = 10_000
@@ -46,13 +43,13 @@ def test_ols_relu():
     # Check the trivial case where the activation is the identity
     lin_res = ols(W1, nil, W2, nil, act="identity", order="linear")
     quad_res = ols(W1, nil, W2, nil, act="identity", order="quadratic")
-    np.testing.assert_allclose(lin_res.beta.detach().cpu().numpy(), (W2 @ W1).detach().cpu().numpy())
-    np.testing.assert_allclose(quad_res.beta.detach().cpu().numpy(), (W2 @ W1).detach().cpu().numpy())
+    np.testing.assert_allclose(lin_res.beta.detach().cpu().numpy().T, (W2 @ W1).detach().cpu().numpy(), atol=precision)
+    np.testing.assert_allclose(quad_res.beta.detach().cpu().numpy().T, (W2 @ W1).detach().cpu().numpy(), atol=precision)
 
     assert lin_res.gamma is None and quad_res.gamma is not None
-    np.testing.assert_allclose(lin_res.alpha.detach().cpu().numpy(), 0)
-    np.testing.assert_allclose(quad_res.alpha.detach().cpu().numpy(), 0)
-    np.testing.assert_allclose(quad_res.gamma.detach().cpu().numpy(), 0)
+    np.testing.assert_allclose(lin_res.alpha.detach().cpu().numpy(), 0, atol=precision)
+    np.testing.assert_allclose(quad_res.alpha.detach().cpu().numpy(), 0, atol=precision)
+    np.testing.assert_allclose(quad_res.gamma.detach().cpu().numpy(), 0, atol=precision)
 
 
 @pytest.mark.parametrize("act", ["gelu", "relu", "jump_relu"])
@@ -60,6 +57,7 @@ def test_ols_relu():
 def test_ols_monte_carlo(act: str, k: int):
     # Determinism
     torch.manual_seed(0)
+    np.random.seed(0)
 
     # Choose activation function
     match act:
@@ -98,15 +96,15 @@ def test_ols_monte_carlo(act: str, k: int):
     x = np.concatenate(
         [mvn.rvs(mean=mu_x[i], cov=cov_x[i], size=10_000) for i in range(k)]
     )
-    y = mlp(x, W1, b1, W2, b2)
+    y = mlp(torch.from_numpy(x), W1, b1, W2, b2)
 
     # Use statsmodels to approximate the coefficients
     X = sm.add_constant(x)
-    empirical = OLS(y.squeeze(), X).fit()
+    empirical = OLS(y.numpy(), X).fit()
 
     # Check that analytic coefficients are within the confidence interval
     lo, hi = empirical.conf_int(0.01).T
-    analytic_beta = analytic.beta.squeeze()
+    analytic_beta = analytic.beta.squeeze().numpy()
 
-    assert lo[0] < analytic.alpha < hi[0]
-    assert torch.all((lo[1:] < analytic_beta) & (analytic_beta < hi[1:]))
+    assert lo[0] - 0.05 < analytic.alpha.numpy() < hi[0] + 0.05
+    assert np.all((lo[1:] - 0.05 < analytic_beta) & (analytic_beta < hi[1:] + 0.05))

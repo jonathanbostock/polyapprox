@@ -2,12 +2,16 @@ import math
 
 import array_api_compat
 from scipy.special import factorial2
+import torch
 
 from .backends import norm_cdf, norm_pdf
 from torch import Tensor
 
 # All of these functions assume theta = 1.0, which loses no generality because
 # we can always rescale our weights and biases to get an equivalent network.
+
+def jump_relu(x: Tensor) -> Tensor:
+    return torch.where(x > 1.0, x, 0)
 
 def jump_relu_ev(mu: Tensor, sigma: Tensor) -> Tensor:
     """Expected value of JumpReLU(x) under N(mu, sigma)"""
