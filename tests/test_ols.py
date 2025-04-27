@@ -11,8 +11,14 @@ from polyapprox.jump_relu import jump_relu
 from polyapprox.relu import relu
 from polyapprox.ols import ols
 
-precision = 1e-6
+precision = 1e-9
 torch.set_default_dtype(torch.float64)
+
+ols_monte_carlo_tolerance = {
+    "relu": 0.0,
+    "gelu": 0.0,
+    "jump_relu": 0.05,
+}
 
 def test_ols_relu():
     torch.manual_seed(0)
@@ -106,5 +112,7 @@ def test_ols_monte_carlo(act: str, k: int):
     lo, hi = empirical.conf_int(0.01).T
     analytic_beta = analytic.beta.squeeze().numpy()
 
-    assert lo[0] - 0.05 < analytic.alpha.numpy() < hi[0] + 0.05
-    assert np.all((lo[1:] - 0.05 < analytic_beta) & (analytic_beta < hi[1:] + 0.05))
+    tol = ols_monte_carlo_tolerance[act]
+
+    assert lo[0] - tol < analytic.alpha.numpy() < hi[0] + tol
+    assert np.all((lo[1:] - tol < analytic_beta) & (analytic_beta < hi[1:] + tol))
