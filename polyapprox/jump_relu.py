@@ -6,16 +6,33 @@ from scipy.special import factorial2
 from .backends import norm_cdf, norm_pdf
 from torch import Tensor
 
-# All of these functions assume theta = 1.0, which we can switch everything to be like
+raise ImportWarning(
+    """
+    JumpReLU currently fails certain tests of OLS regression, though the values are typically close.
+    I don't know if this is an issue with the OLS implementation or the JumpReLU itself.
+    Use at your own risk.
+    """
+)
+
+# All of these functions assume theta = 1.0, which loses no generality because
+# we can always rescale our weights and biases to get an equivalent network.
 
 def jump_relu_ev(mu: Tensor, sigma: Tensor) -> Tensor:
     """Expected value of JumpReLU(x) under N(mu, sigma)"""
     return mu * (1-norm_cdf((1-mu) / sigma)) + sigma * norm_pdf((1-mu) / sigma)
 
-
-def jump_relu_prime_ev(mu: Tensor, sigma: Tensor) -> Tensor:
+# By default, we include the Dirac delta term in the expected value of the derivative
+# since relu_prime is equal to theta(x-1) + dirac_delta(x-1), but since we're also
+# doing some estimates of it approximately, we need the example without the Dirac delta
+# because the Monte Carlo sampler will not sample exactly x=1.
+def jump_relu_prime_ev(mu: ArrayType, sigma: ArrayType, include_dirac_delta_term: bool = True) -> ArrayType:
     """Expected value of JumpReLU'(x) under N(mu, sigma)"""
-    return norm_cdf((1-mu) / sigma)
+    normal_term = norm_cdf((mu-1) / sigma)
+
+    if include_dirac_delta_term:
+        return normal_term + norm_pdf((mu-1) / sigma) # Include the Dirac delta term
+    else:
+        return normal_term
 
 
 def jump_relu_poly_ev(n: int, mu: Tensor, sigma: Tensor) -> Tensor:
