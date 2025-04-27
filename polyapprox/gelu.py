@@ -1,30 +1,29 @@
 import math
 
 import array_api_compat
-from scipy.special import gamma
-from scipy.stats import nct
+import torch
+from torch.special import gamma
 
+from .special import ncdf_t
 from .backends import norm_cdf, norm_pdf
-from torch import Tensor
 
-
-def gelu(x: Tensor) -> Tensor:
+def gelu(x: torch.Tensor) -> torch.Tensor:
     """Gaussian Error Linear Unit (GELU) activation function"""
     return x * norm_cdf(x)
 
 
-def gelu_prime(x: Tensor) -> Tensor:
+def gelu_prime(x: torch.Tensor) -> torch.Tensor:
     """Derivative of GELU(x)"""
     return norm_cdf(x) + x * norm_pdf(x)
 
 
-def gelu_ev(mu: Tensor, sigma: Tensor) -> Tensor:
+def gelu_ev(mu: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
     """Expected value of GELU(x) under N(mu, sigma)"""
     denom = (1 + sigma**2) ** 0.5
     return mu * norm_cdf(mu / denom) + (sigma**2 / denom) * norm_pdf(mu / denom)
 
 
-def gelu_prime_ev(mu: Tensor, sigma: Tensor) -> Tensor:
+def gelu_prime_ev(mu: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
     """Expected value of GELU'(x) under N(mu, sigma)"""
     denom = (1 + sigma**2) ** 0.5
 
@@ -32,7 +31,7 @@ def gelu_prime_ev(mu: Tensor, sigma: Tensor) -> Tensor:
     return norm_cdf(mu / denom) + norm_pdf(mu / denom) * inner
 
 
-def gelu_poly_ev(n: int, mu: Tensor, sigma: Tensor) -> Tensor:
+def gelu_poly_ev(n: int, mu: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
     """Compute E[x^n * GELU(x)] analytically where x ~ N(mu, sigma^2)"""
     xp = array_api_compat.array_namespace(mu, sigma)
     ev = xp.zeros_like(mu)
@@ -44,7 +43,7 @@ def gelu_poly_ev(n: int, mu: Tensor, sigma: Tensor) -> Tensor:
     return ev
 
 
-def integral_noncentral_t(n: int, a, b):
+def integral_noncentral_t(n: int, a: torch.Tensor, b: torch.Tensor) -> float:
     """
     Compute the integral of x^n * G'(x) * G(ax + b) dx from 0 to infinity
     using the noncentral t-distribution formula.
@@ -59,14 +58,14 @@ def integral_noncentral_t(n: int, a, b):
     """
     f = n + 1  # degrees of freedom
     delta = -b  # noncentrality parameter
-    term1 = gamma((n + 1) / 2) * 2 ** ((n - 1) / 2) / math.sqrt(2 * math.pi)
-    prob_term = nct.cdf(
-        a * math.sqrt(n + 1), f, delta
+    term1 = gamma(torch.tensor((n + 1) / 2)) * 2 ** ((n - 1) / 2) / math.sqrt(2 * math.pi)
+    prob_term = ncdf_t(
+        torch.tensor(a * math.sqrt(n + 1)), torch.tensor(f), torch.tensor(delta)
     )  # Pr{T_f < a sqrt(n+1) | delta=-b}
     return term1 * prob_term
 
 
-def integral_noncentral_t_whole_line(n, a, b):
+def integral_noncentral_t_whole_line(n: int, a: torch.Tensor, b: torch.Tensor) -> float:
     """
     Compute the integral of x^n * G'(x) * G(ax + b) dx from -infinity to infinity.
     """

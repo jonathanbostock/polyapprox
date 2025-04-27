@@ -1,30 +1,49 @@
+import numpy as np
 import torch
+from pathlib import Path
+from typing import Tuple
 
-from polyapprox.crosscoders import MLPData, CrossCoderTrainer, CrossCoderTrainerTrainingArgs
-from polyapprox.ols import ols
+from polyapprox.crosscoders import MLP, CrossCoderTrainer, CrossCoderTrainerTrainingArgs
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+torch.set_default_device(device)
 
 def main():
-    d_input = 32
-    d_hidden = d_input * 4
-    d_output = d_input
+    W1, b1, W2, b2 = get_tensors()
 
-    W_1 = torch.randn(d_hidden, d_input)
-    b_1 = torch.randn(d_hidden)
-    W_2 = torch.randn(d_output, d_hidden)
-    b_2 = torch.randn(d_output)
-
-    mlp = MLPData(W_1, b_1, W_2, b_2)
+    mlp = MLP(W1, b1, W2, b2, act="gelu")
 
     args = CrossCoderTrainerTrainingArgs(
-        num_features=1024,
-        target_l0=8,
+        num_features=8096,
+        target_l0=16,
         num_steps=1_000,
-        learning_rate=1e-2,
-        non_linearity="gelu"
+        learning_rate=1e-1,
+        log_frequency=1,
+        num_gamma_rows=128
     )
 
     trainer = CrossCoderTrainer(mlp, "adamw", args)
 
     trainer.train()
+
+def get_tensors() -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    path = Path(__file__).parent.parent / "tensors" / "gelu-1l-state-dict.pt"
+
+    all_tensors = torch.load(path)
+
+    names = ["blocks.0.mlp.W_in", "blocks.0.mlp.b_in", "blocks.0.mlp.W_out", "blocks.0.mlp.b_out"]
+
+    return_list = []
+    for name in names:
+        if "W" in name:
+            return_list.append(all_tensors[name].T.to(device))
+        else:
+            return_list.append(all_tensors[name].to(device))
+
+    return_tuple = tuple(return_list)
+
+    return return_tuple
+
+
 if __name__ == "__main__":
     main()

@@ -3,20 +3,23 @@ import torch
 from torch.optim import AdamW
 from torch import nn
 import torch.nn.functional as F
-from typing import Literal, Optional
+from typing import Literal, Optional, Tuple
 
 from dataclasses import dataclass
 from typing import Dict
 
 from .backends import norm_cdf
 from .ols import ols
+from .gelu import gelu
+from .relu import relu
 
 @dataclass
-class MLPData:
+class MLP:
     W1: torch.Tensor
     b1: torch.Tensor
     W2: torch.Tensor
     b2: torch.Tensor
+    act: Literal["gelu", "relu"]
 
     def __post_init__(self):
         self.params = {
@@ -34,6 +37,17 @@ class MLPData:
             "d_hidden": self.d_hidden,
             "d_output": self.d_output,
         }
+
+        match self.act:
+            case "gelu":
+                self.act_fn = gelu
+            case "relu":
+                self.act_fn = relu
+            case _:
+                raise ValueError(f"Unknown activation function: {self.act}")
+
+    def __call__(self, x: torch.Tensor) -> torch.Tensor:
+        return self.act_fn(x @ self.W1.T + self.b1) @ self.W2.T + self.b2
 
 class CrossCoder(nn.Module):
     def __init__(self, d_input: int, d_hidden: int, d_output: int):
@@ -58,7 +72,7 @@ class CrossCoder(nn.Module):
             x (torch.Tensor): The input tensor.
         """
 
-        preactivations = x @ self.W1 + self.b1
+        preactivations = x @ self.W1.T + self.b1
         active_neurons = (preactivations > 1).float()
         activations = preactivations * active_neurons
 
@@ -66,14 +80,14 @@ class CrossCoder(nn.Module):
             "preactivations": preactivations,
             "active_features": active_neurons,
             "activations": activations,
-            "outputs": activations @ self.W2 + self.b2,
+            "outputs": activations @ self.W2.T + self.b2,
         }
     
     def estimate_l0(self) -> torch.Tensor:
         """Estimate the L0 norm of the model."""
 
         W1_row_mags = torch.sqrt(torch.sum(self.W1 ** 2, dim=1))
-        b1_relative_mags = self.b1 / W1_row_mags
+        b1_relative_mags = (self.b1 - 1) / W1_row_mags
         estimated_l0 = torch.sum(norm_cdf(b1_relative_mags))
         return estimated_l0
 
@@ -84,12 +98,13 @@ class CrossCoderTrainerTrainingArgs:
     num_steps: int
     learning_rate: float
     num_gamma_rows: Optional[int] = None
-    non_linearity: Literal["gelu", "relu"] = "gelu"
+    num_samples: int = 512
+    log_frequency: int = 1
 
 class CrossCoderTrainer:
     def __init__(
             self, 
-            mlp: MLPData,
+            mlp: MLP,
             optimizer: Literal["adamw"],
             args: CrossCoderTrainerTrainingArgs,
             seed: int = 42,
@@ -102,11 +117,15 @@ class CrossCoderTrainer:
         self.args = args
         
         if optimizer == "adamw":
-            self.optimizer = AdamW(self.crosscoder.params.values(), lr=args.learning_rate)
+            self.optimizer = AdamW(self.crosscoder.params.values(), lr=args.learning_rate, weight_decay=0.01)
         else:
             raise ValueError(f"Optimizer {optimizer} not supported")
         
         self.randomizer = np.random.default_rng(seed)
+
+        self.samples = torch.randn((self.args.num_samples, self.mlp.d_input))
+        self.samples_mlp = self.mlp(self.samples)
+        self.samples_mlp_var = torch.var(self.samples_mlp, dim=0)
 
     def train(self) -> None:
 
@@ -123,20 +142,38 @@ class CrossCoderTrainer:
 
 
             with torch.no_grad():
-                mlp_data = ols(**self.mlp.params, act=self.args.non_linearity, order="quadratic", quadratic_term_samples=None)
+                mlp_data = ols(**self.mlp.params, act=self.mlp.act, order="quadratic", quadratic_term_samples=quadratic_term_samples)
 
-            crosscoder_data = ols(**self.crosscoder.params, act="jump_relu", order="quadratic", quadratic_term_samples=None)
+            crosscoder_data = ols(**self.crosscoder.params, act="jump_relu", order="quadratic", quadratic_term_samples=quadratic_term_samples)
 
             self.optimizer.zero_grad()
 
             crosscoder_loss = F.mse_loss(crosscoder_data.coefficients(), mlp_data.coefficients())
-            crosscoder_loss_value = crosscoder_loss.item()
-            l0_loss = (self.crosscoder.estimate_l0() / self.args.target_l0 - 1) ** 2
-            l0_loss_value = l0_loss.item()
+            estimated_l0 = self.crosscoder.estimate_l0()
+            l0_loss = (estimated_l0 / self.args.target_l0 - 1) ** 2
 
             loss = crosscoder_loss + l0_loss
             loss_value = loss.item()
             loss.backward()
+
+            torch.nn.utils.clip_grad_norm_(self.crosscoder.params.values(), max_norm=1.0)
+
             self.optimizer.step()
 
-            print(f"Step {i}: Loss = {loss_value}, Crosscoder Loss = {crosscoder_loss_value}, L0 Loss = {l0_loss_value}")
+            if i % self.args.log_frequency == 0:
+                mse_loss, l0 = self.test_crosscoder()
+                print(f"Step {i}: Loss = {loss_value}, MSE Loss = {mse_loss}, L0 = {l0}, Estimated L0 = {estimated_l0}")
+
+
+    def test_crosscoder(self) -> Tuple[torch.Tensor, torch.Tensor]:
+        with torch.no_grad():
+            crosscoder_outputs = self.crosscoder(self.samples)
+
+            mse = (crosscoder_outputs["outputs"] - self.samples_mlp)**2 / self.samples_mlp_var
+            mse_loss = mse.mean()
+
+            print(crosscoder_outputs["active_features"].shape)
+
+            l0 = crosscoder_outputs["active_features"].sum(dim=-1).mean()
+
+            return mse_loss, l0
