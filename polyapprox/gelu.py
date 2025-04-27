@@ -2,10 +2,9 @@ import math
 
 import array_api_compat
 import torch
-from torch.special import gamma
 
-from .special import ncdf_t
 from .backends import norm_cdf, norm_pdf
+from .special import ncdf_t, gamma
 
 def gelu(x: torch.Tensor) -> torch.Tensor:
     """Gaussian Error Linear Unit (GELU) activation function"""

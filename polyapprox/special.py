@@ -41,3 +41,33 @@ def ncdf_t(x, df, delta):
         result = result.to(x.device)
         
     return result
+
+def gamma(x: torch.Tensor) -> torch.Tensor:
+    """
+    Calculate the gamma function of a tensor.
+    
+    Parameters:
+    x : torch.Tensor
+        The point at which to evaluate the gamma function
+        
+    Returns:
+    torch.Tensor
+        The gamma function value(s)
+    """
+    # Make sure we weren't expecting a gradient
+    assert not x.requires_grad
+    
+    # Convert inputs to NumPy for SciPy calculation
+    x_np = x.detach().cpu().numpy() if isinstance(x, torch.Tensor) else x
+    
+    # Use SciPy's implementation
+    result_np = special.gamma(x_np)
+    
+    # Convert back to PyTorch tensor
+    result = torch.tensor(result_np, dtype=x.dtype if isinstance(x, torch.Tensor) else torch.float32)
+    
+    # If input was on GPU, move result there too
+    if isinstance(x, torch.Tensor) and x.is_cuda:
+        result = result.to(x.device)
+
+    return result
