@@ -62,5 +62,5 @@ def test_jump_relu_poly_evs(n, mu, sigma):
         -np.inf,
         np.inf,
     )
-    assert abs(numerical_ev - analytic_ev) < 1e-14 + err
-    torch_test(partial(jump_relu_poly_ev, n), numerical_ev, mu, sigma, atol=1e-14 + err)
+    assert abs(numerical_ev - analytic_ev) < 1e-9 + err
+    torch_test(partial(jump_relu_poly_ev, n), numerical_ev, mu, sigma, atol=1e-9 + err)

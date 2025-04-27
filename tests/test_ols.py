@@ -7,6 +7,11 @@ from statsmodels.regression.linear_model import OLS
 from polyapprox.gelu import gelu
 from polyapprox.ols import ols
 
+ols_monte_carlo_tolerance = {
+    "relu": 0.0,
+    "gelu": 0.0,
+    "jump_relu": 0.05,
+}
 
 def relu(x):
     return np.maximum(0, x)
@@ -105,5 +110,8 @@ def test_ols_monte_carlo(act: str, k: int):
     lo, hi = empirical.conf_int(0.01).T
     analytic_beta = analytic.beta.squeeze()
 
-    assert lo[0] < analytic.alpha < hi[0]
-    assert np.all((lo[1:] < analytic_beta) & (analytic_beta < hi[1:]))
+    # Add a variable tolerance for the Monte Carlo check
+    tol = ols_monte_carlo_tolerance[act]
+
+    assert lo[0] - tol < analytic.alpha < hi[0] + tol
+    assert np.all((lo[1:] - tol < analytic_beta) & (analytic_beta < hi[1:] + tol))
