@@ -1,6 +1,5 @@
-import math
 import torch
-from torch import Tensor
+import numpy as np
 
 from scipy import special
 
@@ -30,8 +29,9 @@ def ncdf_t(x, df, delta):
     df_np = df.detach().cpu().numpy() if isinstance(df, torch.Tensor) else df
     delta_np = delta.detach().cpu().numpy() if isinstance(delta, torch.Tensor) else delta
     
-    # Use SciPy's implementation
-    result_np = special.nctdtr(df_np, delta_np, x_np)
+    # Use SciPy's implementation, NaNs occur when x is small and delta is large, which should be zero
+    # so we use nan to num to convert this to zeros
+    result_np = np.nan_to_num(special.nctdtr(df_np, delta_np, x_np), nan=0.0)
     
     # Convert back to PyTorch tensor
     result = torch.tensor(result_np, dtype=x.dtype if isinstance(x, torch.Tensor) else torch.float32)

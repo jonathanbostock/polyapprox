@@ -261,14 +261,14 @@ def ols(
 
         # Where rows == cols, E[x * y] = E[x^2] = 1
         # Where rows != cols, E[x * y] = E[x] * E[y] = 0
-        feature_mean = (rows == cols).to(W2.dtype)
+        feature_mean = (rows == cols).to(W2.dtype).to(torch.get_default_device())
 
         if quadratic_term_samples is not None:
             feature_mean = feature_mean[quadratic_term_samples]
 
         # Where rows == cols, Var[x * y] = Var[x^2] = E[x^4] - E[x^2]^2 = 3 - 1 = 2
         # Where rows != cols, Var[x * y] = E[x^2 * y^2] - E[x * y]^2 = 1 - 0 = 1
-        feature_var = 1 + (rows == cols)
+        feature_var = 1 + (rows == cols).to(torch.get_default_device())
 
         if quadratic_term_samples is not None:
             feature_var = feature_var[quadratic_term_samples]

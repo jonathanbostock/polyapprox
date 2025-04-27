@@ -1,6 +1,5 @@
 import math
 
-import array_api_compat
 import torch
 
 from .backends import norm_cdf, norm_pdf
@@ -32,8 +31,7 @@ def gelu_prime_ev(mu: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
 
 def gelu_poly_ev(n: int, mu: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
     """Compute E[x^n * GELU(x)] analytically where x ~ N(mu, sigma^2)"""
-    xp = array_api_compat.array_namespace(mu, sigma)
-    ev = xp.zeros_like(mu)
+    ev = torch.zeros_like(mu)
 
     for k in range(n + 2):
         coef = math.comb(n + 1, k) * mu ** (n + 1 - k) * sigma**k

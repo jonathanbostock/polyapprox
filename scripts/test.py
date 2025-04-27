@@ -14,7 +14,7 @@ def main():
     mlp = MLP(W1, b1, W2, b2, act="gelu")
 
     args = CrossCoderTrainerTrainingArgs(
-        num_features=8096,
+        num_features=4096,
         target_l0=16,
         num_steps=1_000,
         learning_rate=1e-1,

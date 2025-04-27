@@ -148,7 +148,7 @@ class CrossCoderTrainer:
 
             self.optimizer.zero_grad()
 
-            crosscoder_loss = F.mse_loss(crosscoder_data.coefficients(), mlp_data.coefficients())
+            crosscoder_loss = ((crosscoder_data.coefficients() - mlp_data.coefficients())**2).mean()
             estimated_l0 = self.crosscoder.estimate_l0()
             l0_loss = (estimated_l0 / self.args.target_l0 - 1) ** 2
 
