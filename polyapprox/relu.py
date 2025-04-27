@@ -4,8 +4,11 @@ import array_api_compat
 from scipy.special import factorial2
 
 from .backends import norm_cdf, norm_pdf
+import torch
 from torch import Tensor
 
+def relu(x: Tensor) -> Tensor:
+    return torch.where(x > 0, x, 0)
 
 def relu_ev(mu: Tensor, sigma: Tensor) -> Tensor:
     """Expected value of RELU(x) under N(mu, sigma)"""
