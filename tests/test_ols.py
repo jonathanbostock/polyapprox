@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 import pytest
 import statsmodels.api as sm
 from scipy.stats import multivariate_normal as mvn
@@ -17,11 +18,13 @@ def jump_relu(x):
     return np.where(x > 1.0, x, 0)
 
 def test_ols_relu():
-    d = 10
-    nil = np.zeros(d)
+    torch.manual_seed(0)
 
-    W1 = np.random.randn(d, d)
-    W2 = np.random.randn(d, d)
+    d = 10
+    nil = torch.zeros(d)
+
+    W1 = torch.randn(d, d)
+    W2 = torch.randn(d, d)
 
     # When x ~ N(0, 1) and there are no biases, the coefficients take the intuitive
     # form: 0.5 * W2 @ W1
@@ -32,31 +35,31 @@ def test_ols_relu():
 
     # Monte Carlo check that the FVU is below 1
     n = 10_000
-    x = np.random.randn(n, d)
+    x = torch.randn(n, d)
     y = relu(x @ W1.T) @ W2.T
 
     # Quadratic FVU should be lower than linear FVU, which should be lower than 1
-    lin_fvu = np.square(y - lin_res(x)).sum() / np.square(y).sum()
-    quad_fvu = np.square(y - quad_res(x)).sum() / np.square(y).sum()
+    lin_fvu = (y - lin_res(x)).square().sum() / y.square().sum()
+    quad_fvu = (y - quad_res(x)).square().sum() / y.square().sum()
     assert quad_fvu < lin_fvu < 1
 
     # Check the trivial case where the activation is the identity
     lin_res = ols(W1, nil, W2, nil, act="identity", order="linear")
     quad_res = ols(W1, nil, W2, nil, act="identity", order="quadratic")
-    np.testing.assert_allclose(lin_res.beta.T, W2 @ W1)
-    np.testing.assert_allclose(quad_res.beta.T, W2 @ W1)
+    np.testing.assert_allclose(lin_res.beta.detach().cpu().numpy(), (W2 @ W1).detach().cpu().numpy())
+    np.testing.assert_allclose(quad_res.beta.detach().cpu().numpy(), (W2 @ W1).detach().cpu().numpy())
 
     assert lin_res.gamma is None and quad_res.gamma is not None
-    np.testing.assert_allclose(lin_res.alpha, 0)
-    np.testing.assert_allclose(quad_res.alpha, 0)
-    np.testing.assert_allclose(quad_res.gamma, 0)
+    np.testing.assert_allclose(lin_res.alpha.detach().cpu().numpy(), 0)
+    np.testing.assert_allclose(quad_res.alpha.detach().cpu().numpy(), 0)
+    np.testing.assert_allclose(quad_res.gamma.detach().cpu().numpy(), 0)
 
 
 @pytest.mark.parametrize("act", ["gelu", "relu", "jump_relu"])
 @pytest.mark.parametrize("k", [1, 2, 3])
 def test_ols_monte_carlo(act: str, k: int):
     # Determinism
-    np.random.seed(0)
+    torch.manual_seed(0)
 
     # Choose activation function
     match act:
@@ -79,14 +82,14 @@ def test_ols_monte_carlo(act: str, k: int):
 
     # Construct a random Gaussian mixture with k components
     # random psd matrix d_in x d_in
-    A = np.random.randn(k, d_in, d_in) / np.sqrt(d_in)
+    A = torch.randn(k, d_in, d_in) / np.sqrt(d_in)
     cov_x = A @ A.mT
-    mu_x = np.random.randn(k, d_in)
+    mu_x = torch.randn(k, d_in)
 
-    W1 = np.random.randn(d_inner, d_in) / np.sqrt(d_in)
-    W2 = np.random.randn(d_out, d_inner) / np.sqrt(d_inner)
-    b1 = np.random.randn(d_inner) / np.sqrt(d_in)
-    b2 = np.random.randn(d_out)
+    W1 = torch.randn(d_inner, d_in) / np.sqrt(d_in)
+    W2 = torch.randn(d_out, d_inner) / np.sqrt(d_inner)
+    b1 = torch.randn(d_inner) / np.sqrt(d_in)
+    b2 = torch.randn(d_out)
 
     # Compute analytic coefficients
     analytic = ols(W1, b1, W2, b2, act=act, cov=cov_x.squeeze(), mean=mu_x.squeeze())
@@ -106,4 +109,4 @@ def test_ols_monte_carlo(act: str, k: int):
     analytic_beta = analytic.beta.squeeze()
 
     assert lo[0] < analytic.alpha < hi[0]
-    assert np.all((lo[1:] < analytic_beta) & (analytic_beta < hi[1:]))
+    assert torch.all((lo[1:] < analytic_beta) & (analytic_beta < hi[1:]))
