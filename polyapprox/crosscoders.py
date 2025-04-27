@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from torch.optim import AdamW
+from torch.optim import AdamW, SGD
 from torch import nn
 import torch.nn.functional as F
 from typing import Literal, Optional, Tuple
@@ -8,10 +8,10 @@ from typing import Literal, Optional, Tuple
 from dataclasses import dataclass
 from typing import Dict
 
-from .backends import norm_cdf
-from .ols import ols
-from .gelu import gelu
-from .relu import relu
+from polyapprox.backends import norm_cdf
+from polyapprox.ols import ols
+from polyapprox.gelu import gelu
+from polyapprox.relu import relu
 
 @dataclass
 class MLP:
@@ -53,9 +53,9 @@ class CrossCoder(nn.Module):
     def __init__(self, d_input: int, d_hidden: int, d_output: int):
         super().__init__()
 
-        self.W1 = nn.Parameter(torch.randn(d_hidden, d_input))
+        self.W1 = nn.Parameter(torch.randn(d_hidden, d_input) / np.sqrt(d_input))
         self.b1 = nn.Parameter(torch.zeros(d_hidden))
-        self.W2 = nn.Parameter(torch.randn(d_output, d_hidden))
+        self.W2 = nn.Parameter(self.W1.T.clone())
         self.b2 = nn.Parameter(torch.zeros(d_output))
 
         self.params = nn.ParameterDict({
@@ -105,8 +105,8 @@ class CrossCoderTrainer:
     def __init__(
             self, 
             mlp: MLP,
-            optimizer: Literal["adamw"],
             args: CrossCoderTrainerTrainingArgs,
+            optimizer: Literal["adamw"] = "adamw",
             seed: int = 42,
             ) -> None:
         
@@ -115,11 +115,12 @@ class CrossCoderTrainer:
         self.crosscoder = CrossCoder(mlp.d_input, args.num_features, mlp.d_output)
         self.optimizer = optimizer
         self.args = args
-        
-        if optimizer == "adamw":
-            self.optimizer = AdamW(self.crosscoder.params.values(), lr=args.learning_rate, weight_decay=0.01)
-        else:
-            raise ValueError(f"Optimizer {optimizer} not supported")
+
+        match optimizer:
+            case "adamw":
+                self.optimizer = AdamW(self.crosscoder.params.values(), lr=args.learning_rate, weight_decay=0.01)
+            case _:
+                raise ValueError(f"Optimizer {optimizer} not supported")      
         
         self.randomizer = np.random.default_rng(seed)
 
@@ -148,11 +149,13 @@ class CrossCoderTrainer:
 
             self.optimizer.zero_grad()
 
-            crosscoder_loss = ((crosscoder_data.coefficients() - mlp_data.coefficients())**2).mean()
+            alpha_loss = F.mse_loss(crosscoder_data.alpha, mlp_data.alpha) / mlp_data.alpha.pow(2).mean()
+            beta_loss = F.mse_loss(crosscoder_data.beta, mlp_data.beta) / mlp_data.beta.pow(2).mean()
+            gamma_loss = F.mse_loss(crosscoder_data.gamma, mlp_data.gamma) / mlp_data.gamma.pow(2).mean()
             estimated_l0 = self.crosscoder.estimate_l0()
             l0_loss = (estimated_l0 / self.args.target_l0 - 1) ** 2
 
-            loss = crosscoder_loss + l0_loss
+            loss = alpha_loss + beta_loss + gamma_loss + l0_loss
             loss_value = loss.item()
             loss.backward()
 
@@ -162,7 +165,8 @@ class CrossCoderTrainer:
 
             if i % self.args.log_frequency == 0:
                 mse_loss, l0 = self.test_crosscoder()
-                print(f"Step {i}: Loss = {loss_value}, MSE Loss = {mse_loss}, L0 = {l0}, Estimated L0 = {estimated_l0}")
+                print(f"Step {i}: Alpha Loss = {alpha_loss.item()}, Beta Loss = {beta_loss.item()}, Gamma Loss = {gamma_loss.item()}, L0 Loss = {l0_loss.item()}")
+                print(f"MSE Loss = {mse_loss}, L0 = {l0}, Estimated L0 = {estimated_l0}")
 
 
     def test_crosscoder(self) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -171,8 +175,6 @@ class CrossCoderTrainer:
 
             mse = (crosscoder_outputs["outputs"] - self.samples_mlp)**2 / self.samples_mlp_var
             mse_loss = mse.mean()
-
-            print(crosscoder_outputs["active_features"].shape)
 
             l0 = crosscoder_outputs["active_features"].sum(dim=-1).mean()
 

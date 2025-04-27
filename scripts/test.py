@@ -15,14 +15,14 @@ def main():
 
     args = CrossCoderTrainerTrainingArgs(
         num_features=4096,
-        target_l0=16,
+        target_l0=32,
         num_steps=1_000,
-        learning_rate=1e-1,
-        log_frequency=1,
-        num_gamma_rows=128
+        learning_rate=1e-3,
+        log_frequency=10,
+        num_gamma_rows=1024
     )
 
-    trainer = CrossCoderTrainer(mlp, "adamw", args)
+    trainer = CrossCoderTrainer(mlp, args)
 
     trainer.train()
 
